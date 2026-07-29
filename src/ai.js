@@ -28,19 +28,18 @@ function extractText(result) {
   if (typeof result === 'string') return result;
   if (!result || typeof result !== 'object') return null;
 
-  const choice = result.choices?.[0]?.message;
-  if (!choice) {
-    // nested: result.response.choices[0].message
-    const nested = result.response?.choices?.[0]?.message;
-    if (nested) {
-      return nested.reasoning_content || nested.reasoning || nested.content || null;
-    }
+  const msg = result.choices?.[0]?.message
+           || result.response?.choices?.[0]?.message;
+  if (!msg) {
     if (typeof result.response === 'string') return result.response;
     return null;
   }
 
-  // GLM reasoning models put output in reasoning_content, content may be null
-  return choice.reasoning_content || choice.reasoning || choice.content || null;
+  // content FIRST (Qwen puts final answer in content, reasoning in reasoning_content)
+  // reasoning_content as fallback (GLM may put answer in reasoning_content, content=null)
+  const text = msg.content || msg.reasoning_content || msg.reasoning;
+  if (typeof text === 'string' && text.length > 5) return text;
+  return null;
 }
 
 // ── JSON extraction with markdown guard ─────────────────────
