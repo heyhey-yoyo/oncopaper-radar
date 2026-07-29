@@ -294,7 +294,8 @@ function buildEuroPMCQuery(queryGroups, excludeTerms, excludeReviews) {
     query += ' NOT (REVIEW_TYPE:"Review")';
   }
 
-  query += ' AND (SRC:"MED")'; // 只要 MEDLINE 收录的原创研究
+  // 不强制限制 SRC:"MED" — MEDLINE 索引有几周延迟，会漏掉最新论文
+  // 如需限制，在排除词中加入
 
   return query;
 }
