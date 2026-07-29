@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OncoPaper Radar — 肿瘤文献雷达</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <h1 class="logo">
+        <span class="logo-icon">🧬</span>
+        <span>OncoPaper Radar</span>
+      </h1>
+      <div class="topbar-actions">
+        <span id="syncStatus" class="sync-status"></span>
+        <button id="adminBtn" class="btn btn-ghost" title="管理员设置">⚙️</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 管理面板 (隐藏) -->
+  <section id="adminPanel" class="admin-panel" hidden>
+    <div class="panel-card">
+      <h2>管理设置</h2>
+
+      <div class="form-group">
+        <label for="adminToken">管理员令牌</label>
+        <input type="password" id="adminToken" placeholder="已设置令牌则必填">
+      </div>
+
+      <hr>
+
+      <div class="form-group">
+        <label for="queryGroups">
+          检索概念
+          <span class="help">每行一个概念；同义词用 <code>|</code> 分隔。行与行之间是 AND 关系。</span>
+        </label>
+        <textarea id="queryGroups" rows="5"></textarea>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="focus">"有趣"偏好</label>
+          <textarea id="focus" rows="3" placeholder="例如：优先机制研究；关注遗传学证据、体内模型"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="excludeTerms">排除词 <span class="help">用 <code>|</code> 分隔</span></label>
+          <textarea id="excludeTerms" rows="3" placeholder="例如：prognostic signature | nomogram"></textarea>
+        </div>
+      </div>
+
+      <div class="form-row form-row-numbers">
+        <div class="form-group">
+          <label for="maxArticles">最多入选篇数</label>
+          <input type="number" id="maxArticles" min="1" max="10" value="5">
+        </div>
+        <div class="form-group">
+          <label for="lookbackDays">回看天数</label>
+          <input type="number" id="lookbackDays" min="1" max="30" value="7">
+        </div>
+        <div class="form-group form-check">
+          <label>
+            <input type="checkbox" id="excludeReviews" checked>
+            排除综述
+          </label>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button id="saveConfigBtn" class="btn btn-primary">保存配置</button>
+        <button id="syncBtn" class="btn btn-accent">⚡ 立即同步</button>
+      </div>
+
+      <p id="adminMessage" class="message" hidden></p>
+    </div>
+  </section>
+
+  <!-- 主内容 -->
+  <main class="main">
+    <!-- 概览卡片 -->
+    <section id="overviewCard" class="card overview-card" hidden>
+      <div class="overview-header">
+        <div>
+          <span class="overview-date" id="overviewDate"></span>
+          <span class="overview-badge" id="overviewBadge"></span>
+        </div>
+        <span class="overview-meta" id="overviewMeta"></span>
+      </div>
+    </section>
+
+    <!-- 文章列表 -->
+    <section id="articlesList" class="articles-list"></section>
+
+    <!-- 空状态 -->
+    <section id="emptyState" class="card empty-state">
+      <div class="empty-icon">🔬</div>
+      <h2>还没有简报</h2>
+      <p>点击右上角 ⚙️ 配置检索关键词，然后手动同步或等待每日自动同步。</p>
+      <p class="empty-hint">也可以加 <code>?demo=1</code> 观看演示。</p>
+    </section>
+
+    <!-- 加载中 -->
+    <section id="loadingState" class="card empty-state" hidden>
+      <div class="spinner"></div>
+      <p id="loadingText">加载中...</p>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
