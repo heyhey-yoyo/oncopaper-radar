@@ -73,9 +73,9 @@ function requireAdmin(request, env) {
 /* ── GET /api/model-info ──────────────────────────────────── */
 function handleModelInfo() {
   return json({
-    primary: '@cf/qwen/qwen3-30b-a3b-fp8',
-    fallback: '@cf/zai-org/glm-4.7-flash',
-    cheap_fallback: '@cf/ibm-granite/granite-4.0-h-micro',
+    primary: 'Qwen3-30B-A3B',
+    fallback: 'GLM-4.7-Flash',
+    cheap_fallback: 'Granite 4.0 H Micro',
     provider: 'Cloudflare Workers AI',
     mode: 'Free tier priority',
   });

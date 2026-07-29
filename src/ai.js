@@ -4,13 +4,14 @@
    ============================================================ */
 
 // ── Model chain ────────────────────────────────────────────
-const GLM    = '@cf/zai-org/glm-4.7-flash';
+// Qwen primary: stable, no reasoning overhead, proven JSON output
+// GLM secondary: deeper analysis when it works (reasoning model issues TBD)
+// Granite last resort
 const QWEN   = '@cf/qwen/qwen3-30b-a3b-fp8';
+const GLM    = '@cf/zai-org/glm-4.7-flash';
 const GRANITE = '@cf/ibm-granite/granite-4.0-h-micro';
 
-// All tasks: GLM first (reasoning yields better analysis), Qwen fallback, Granite last
-// Daily quota: profile + scoring ≈ 300 Neurons, free tier 10,000/day
-const MODEL_CHAIN = [GLM, QWEN, GRANITE];
+const MODEL_CHAIN = [QWEN, GLM, GRANITE];
 
 // ── Prompt version (bump to invalidate caches) ──────────────
 export const PROMPT_VERSION = '2026-07-29-v1';
@@ -66,7 +67,7 @@ function parseJSON(text) {
 export async function runAI(env, messages, options = {}) {
   const {
     temperature = 0.1,
-    maxCompletionTokens = 4000,
+    maxCompletionTokens = 2000,
     chain = MODEL_CHAIN,
   } = options;
 
@@ -128,7 +129,7 @@ export async function generateProfile(env, papers) {
     { role: 'user', content: `论文：\n\n${papersText}` },
   ];
 
-  const { parsed, model } = await runAIForJSON(env, messages, { maxCompletionTokens: 12000 });
+  const { parsed, model } = await runAIForJSON(env, messages, { maxCompletionTokens: 4000 });
 
   return {
     focus: parsed.researcherProfile || '',
@@ -174,7 +175,7 @@ export async function scorePapers(env, articles, focus, maxArticles) {
 
 只输出 JSON。未入选的论文不要包含。按总分从高到低排列，最多${maxArticles}篇。` },
     { role: 'user', content: `候选论文：\n\n${articlesText}` },
-  ], { temperature: 0, maxCompletionTokens: 1000 * maxArticles + 3000 });
+  ], { temperature: 0, maxCompletionTokens: 500 * maxArticles + 1000 });
 
   const items = Array.isArray(parsed) ? parsed : (parsed.articles ?? parsed.results ?? []);
   if (!items.length) throw new Error('AI returned empty articles array');
