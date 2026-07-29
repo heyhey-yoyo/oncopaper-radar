@@ -425,22 +425,21 @@ async function scoreWithAI(env, articles, focus, maxArticles) {
 
   // 提取 AI 响应文本（兼容多种返回格式）
   function extractText(result) {
-    // Workers AI 标准格式
-    const content = result?.response?.choices?.[0]?.message?.content;
+    // Workers AI: choices 在顶层
+    const content = result?.choices?.[0]?.message?.content;
     if (content && typeof content === 'string' && content.length > 5) return content;
 
-    // 直接在 response 上的 text
+    // 顶层 response 是字符串
     if (typeof result?.response === 'string' && result.response.length > 5) return result.response;
 
-    // 旧格式 response.text
-    if (typeof result?.response?.text === 'string' && result.response.text.length > 5) return result.response.text;
+    // 旧格式嵌套: result.response.choices[0].message.content
+    const nested = result?.response?.choices?.[0]?.message?.content;
+    if (nested && typeof nested === 'string' && nested.length > 5) return nested;
 
     // 整个 result 是字符串
     if (typeof result === 'string' && result.length > 5) return result;
 
-    // 记录实际收到的结构用于调试
-    console.error('AI response structure:', JSON.stringify(Object.keys(result || {})));
-    console.error('AI response sample:', JSON.stringify(result).slice(0, 500));
+    console.error('AI response keys:', JSON.stringify(Object.keys(result || {})));
     return null;
   }
 
