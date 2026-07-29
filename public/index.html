@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OncoPaper Radar — 肿瘤文献雷达</title>
+  <title>OncoPaper Radar - 肿瘤文献雷达</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -70,23 +70,33 @@
     </div>
 
     <div class="drawer-body">
-      <!-- 研究者画像 (最上面) -->
+
+      <!-- AI 生成画像 -->
       <fieldset class="form-section">
-        <legend>🎯 研究者画像</legend>
-        <p class="form-hint">告诉 AI 你关注什么样的研究，它会影响每篇论文的评分倾向。</p>
+        <legend>AI 生成画像</legend>
+        <p class="form-hint">粘贴你感兴趣的论文 PMID，AI 会自动生成研究者画像、检索概念和排除词。多个 PMID 用逗号或换行分隔。</p>
+        <textarea id="pmidInput" class="input textarea" rows="2" placeholder="12345678, 23456789"></textarea>
+        <button id="generateProfileBtn" class="btn btn-outline" style="margin-top:8px">根据 PMID 生成</button>
+        <p id="generateMsg" class="drawer-message" hidden></p>
+      </fieldset>
+
+      <!-- 研究者画像 -->
+      <fieldset class="form-section">
+        <legend>研究者画像</legend>
+        <p class="form-hint">告诉 AI 你关注什么样的研究，影响论文评分倾向。</p>
         <textarea id="focus" class="input textarea" rows="4" placeholder="优先机制研究；关注遗传学证据、体内模型..."></textarea>
       </fieldset>
 
       <!-- 检索概念 -->
       <fieldset class="form-section">
-        <legend>🔍 检索概念</legend>
+        <legend>检索概念</legend>
         <p class="form-hint">每行一个概念，同义词用 <code>|</code> 分隔。行与行之间是 AND 关系。</p>
         <textarea id="queryGroups" class="input textarea" rows="4" placeholder="KRAS G12D | KRASG12D&#10;pancreatic cancer | PDAC"></textarea>
       </fieldset>
 
       <!-- 排除词 -->
       <fieldset class="form-section">
-        <legend>🚫 排除词</legend>
+        <legend>排除词</legend>
         <p class="form-hint">用 <code>|</code> 分隔。</p>
         <textarea id="excludeTerms" class="input textarea" rows="2" placeholder="prognostic signature | nomogram"></textarea>
       </fieldset>
@@ -109,8 +119,8 @@
       </div>
 
       <!-- 未登录提示 -->
-      <div id="drawerLoginPrompt" class="drawer-login-prompt">
-        <p>⚠️ 未登录：只能查看设置，不能保存或同步。</p>
+      <div id="drawerLoginPrompt" class="drawer-login-prompt" hidden>
+        <p>未登录：只能查看设置，不能保存或同步。</p>
         <button id="drawerLoginBtn" class="btn btn-outline">去登录</button>
       </div>
     </div>

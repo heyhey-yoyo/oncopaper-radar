@@ -179,6 +179,7 @@ p { margin: 0; }
   border-radius: var(--radius-sm);
   text-align: center;
 }
+.drawer-login-prompt[hidden] { display: none; }
 .drawer-login-prompt p {
   font-size: .825rem;
   color: var(--amber);

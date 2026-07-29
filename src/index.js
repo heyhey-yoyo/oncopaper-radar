@@ -16,6 +16,9 @@ export default {
     if (path === '/api/sync' && request.method === 'POST') {
       return handleSync(request, env);
     }
+    if (path === '/api/generate-profile' && request.method === 'POST') {
+      return handleGenerateProfile(request, env);
+    }
     if (path === '/api/debug/sync' && request.method === 'GET') {
       return handleDebugSync(env);
     }
@@ -146,6 +149,108 @@ async function handleSync(request, env) {
   } catch (e) {
     return json({ status: 'error', error: e.message }, 500);
   }
+}
+
+/* ── POST /api/generate-profile ────────────────────────────── */
+async function handleGenerateProfile(request, env) {
+  if (!requireAdmin(request, env)) return json({ error: 'Unauthorized' }, 401);
+
+  let body;
+  try { body = await request.json(); } catch { return json({ error: 'Bad JSON' }, 400); }
+
+  const pmids = (body.pmids || []).map(p => String(p).trim()).filter(Boolean);
+  if (!pmids.length) return json({ error: 'No PMIDs provided' }, 400);
+
+  // 从 Europe PMC 获取论文详情
+  const papers = await fetchEuropePMCByPMIDs(pmids);
+  if (!papers.length) return json({ error: 'No papers found for given PMIDs' }, 404);
+
+  // 构造 AI prompt
+  const papersText = papers.map((p, i) =>
+    `${i + 1}. [PMID: ${p.pmid}] ${p.title}\n   ${(p.abstract || '').slice(0, 1000)}`
+  ).join('\n\n');
+
+  const model = env.AI_MODEL || '@cf/meta/llama-3.1-8b-instruct-fast';
+
+  const systemPrompt = `你是肿瘤分子机制领域的资深研究者。用户提供了他们感兴趣的论文列表，请根据这些论文生成：
+
+1. 研究者画像：一段中文描述，总结这些论文反映的研究兴趣、方法论偏好和关注点（150-300字）
+2. 检索概念：提取核心基因/通路/疾病/表型关键词，每行一个概念，同义词用 | 分隔
+
+输出 JSON：
+{
+  "focus": "研究者画像...",
+  "query_groups": ["概念1 | 同义词1", "概念2"],
+  "exclude_terms": "排除词1 | 排除词2"
+}`;
+
+  const userMessage = `这些是我感兴趣的论文：\n\n${papersText}\n\n请分析我的研究兴趣，生成研究者画像、检索概念和排除词。只输出 JSON。`;
+
+  try {
+    const result = await env.AI.run(model, {
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      max_tokens: 2048,
+    });
+
+    const text = extractTextAI(result);
+    if (!text) throw new Error('Empty AI response');
+
+    const parsed = extractJSONAI(text);
+    if (!parsed) throw new Error('Cannot parse AI response');
+
+    return json({
+      focus: parsed.focus || '',
+      query_groups: parsed.query_groups || [],
+      exclude_terms: parsed.exclude_terms || '',
+    });
+  } catch (e) {
+    return json({ error: `AI generation failed: ${e.message}` }, 500);
+  }
+}
+
+/* ── HELPERS: AI response parsing (shared) ─────────────────── */
+function extractTextAI(result) {
+  const content = result?.choices?.[0]?.message?.content;
+  if (content && typeof content === 'string' && content.length > 5) return content;
+  if (typeof result?.response === 'string' && result.response.length > 5) return result.response;
+  const nested = result?.response?.choices?.[0]?.message?.content;
+  if (nested && typeof nested === 'string' && nested.length > 5) return nested;
+  if (typeof result === 'string' && result.length > 5) return result;
+  return null;
+}
+
+function extractJSONAI(text) {
+  try { return JSON.parse(text); } catch {}
+  const cleaned = text.replace(/```(?:json)?\s*([\s\S]*?)```/g, '$1').trim();
+  try { return JSON.parse(cleaned); } catch {}
+  const objMatch = text.match(/\{[\s\S]*\}/);
+  if (objMatch) { try { return JSON.parse(objMatch[0]); } catch {} }
+  const arrMatch = text.match(/\[[\s\S]*\]/);
+  if (arrMatch) { try { return JSON.parse(arrMatch[0]); } catch {} }
+  return null;
+}
+
+/* ── HELPERS: fetch papers by PMIDs ────────────────────────── */
+async function fetchEuropePMCByPMIDs(pmids) {
+  const query = pmids.map(p => `EXT_ID:${p}`).join(' OR ');
+  const params = new URLSearchParams({
+    query, resultType: 'core', pageSize: String(pmids.length),
+    format: 'json', sort: 'P_PDATE_D desc',
+  });
+  const url = `https://www.ebi.ac.uk/europepmc/webservices/rest/search?${params}`;
+  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if (!res.ok) throw new Error(`Europe PMC HTTP ${res.status}`);
+  const data = await res.json();
+  return (data.resultList?.result ?? []).map(r => ({
+    pmid: r.pmid || '',
+    title: r.title || 'Untitled',
+    abstract: r.abstractText || '',
+    journal: r.journalTitle || '',
+    pub_date: r.firstPublicationDate || r.pubYear || '',
+  }));
 }
 
 /* ── GET /api/debug/sync ──────────────────────────────────── */
@@ -423,49 +528,7 @@ async function scoreWithAI(env, articles, focus, maxArticles) {
 
   const userMessage = `候选论文：\n\n${articlesText}`;
 
-  // 提取 AI 响应文本（兼容多种返回格式）
-  function extractText(result) {
-    // Workers AI: choices 在顶层
-    const content = result?.choices?.[0]?.message?.content;
-    if (content && typeof content === 'string' && content.length > 5) return content;
-
-    // 顶层 response 是字符串
-    if (typeof result?.response === 'string' && result.response.length > 5) return result.response;
-
-    // 旧格式嵌套: result.response.choices[0].message.content
-    const nested = result?.response?.choices?.[0]?.message?.content;
-    if (nested && typeof nested === 'string' && nested.length > 5) return nested;
-
-    // 整个 result 是字符串
-    if (typeof result === 'string' && result.length > 5) return result;
-
-    console.error('AI response keys:', JSON.stringify(Object.keys(result || {})));
-    return null;
-  }
-
-  // 从文本中提取 JSON
-  function extractJSON(text) {
-    // 直接解析
-    try { return JSON.parse(text); } catch {}
-
-    // 去掉 markdown 代码块
-    const cleaned = text.replace(/```(?:json)?\s*([\s\S]*?)```/g, '$1').trim();
-    try { return JSON.parse(cleaned); } catch {}
-
-    // 提取第一个 { 到最后一个 }
-    const objMatch = text.match(/\{[\s\S]*\}/);
-    if (objMatch) {
-      try { return JSON.parse(objMatch[0]); } catch {}
-    }
-
-    // 提取第一个 [ 到最后一个 ]
-    const arrMatch = text.match(/\[[\s\S]*\]/);
-    if (arrMatch) {
-      try { return JSON.parse(arrMatch[0]); } catch {}
-    }
-
-    return null;
-  }
+  // 使用共享的 AI 响应解析函数 (定义在下方)
 
   try {
     const result = await env.AI.run(model, {
@@ -480,14 +543,14 @@ async function scoreWithAI(env, articles, focus, maxArticles) {
     const rawKeys = JSON.stringify(Object.keys(result || {}));
     console.log(`AI result keys: ${rawKeys}`);
 
-    const text = extractText(result);
+    const text = extractTextAI(result);
     if (!text) {
       throw new Error(`Cannot extract text from AI response. Keys: ${rawKeys}`);
     }
 
     console.log(`AI text length: ${text.length}, first 200: ${text.slice(0, 200)}`);
 
-    const parsed = extractJSON(text);
+    const parsed = extractJSONAI(text);
     if (!parsed) {
       throw new Error(`Cannot parse JSON from AI text. Content: ${text.slice(0, 300)}`);
     }
