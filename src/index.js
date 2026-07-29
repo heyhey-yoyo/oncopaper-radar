@@ -430,8 +430,12 @@ async function scoreWithAI(env, articles, focus, maxArticles) {
       max_tokens: 4096,
     });
 
-    const text = result?.response ?? result;
-    if (!text) throw new Error('Empty AI response');
+    // Workers AI 返回格式: { response: { choices: [{ message: { content: "..." } }] } }
+    const text = result?.response?.choices?.[0]?.message?.content
+      ?? (typeof result?.response === 'string' ? result.response : null)
+      ?? result?.response
+      ?? result;
+    if (!text || typeof text !== 'string') throw new Error('Empty AI response');
 
     // 尝试解析 JSON
     let parsed;
