@@ -16,6 +16,9 @@ export default {
     if (path === '/api/sync' && request.method === 'POST') {
       return handleSync(request, env);
     }
+    if (path === '/api/debug/sync' && request.method === 'GET') {
+      return handleDebugSync(env);
+    }
     if (path === '/api/digests' && request.method === 'GET') {
       return handleGetDigests(request, env);
     }
@@ -140,6 +143,54 @@ async function handleSync(request, env) {
   } catch (e) {
     return json({ status: 'error', error: e.message }, 500);
   }
+}
+
+/* ── GET /api/debug/sync ──────────────────────────────────── */
+async function handleDebugSync(env) {
+  const settings = await env.DB.prepare('SELECT * FROM settings WHERE id = 1').first();
+  if (!settings) return json({ error: 'Settings not found' }, 404);
+
+  const queryGroups = safeParse(settings.query_groups, []);
+  const searchQuery = buildEuroPMCQuery(queryGroups, settings.exclude_terms, settings.exclude_reviews);
+
+  // 展示构造的查询
+  const date = new Date();
+  date.setDate(date.getDate() - (settings.lookback_days || 7));
+  const fromDate = date.toISOString().slice(0, 10);
+
+  const params = new URLSearchParams({
+    query: searchQuery,
+    resultType: 'core',
+    pageSize: '50',
+    format: 'json',
+    sort: 'FIRST_PUBLICATION_DATE desc',
+    fromSearchDate: fromDate,
+  });
+
+  const euPmcUrl = `https://www.ebi.ac.uk/europepmc/webservices/rest/search?${params}`;
+
+  // 实际调一次
+  let raw;
+  try {
+    const res = await fetch(euPmcUrl, { headers: { 'Accept': 'application/json' } });
+    raw = await res.json();
+  } catch (e) {
+    return json({ error: 'Fetch failed', message: e.message }, 500);
+  }
+
+  return json({
+    query: searchQuery,
+    eupmc_url: euPmcUrl,
+    lookback_days: settings.lookback_days,
+    from_date: fromDate,
+    hit_count: raw?.resultList?.result?.length ?? 0,
+    total_hits: raw?.hitCount ?? 0,
+    sample: (raw?.resultList?.result ?? []).slice(0, 3).map(r => ({
+      title: r.title,
+      pubDate: r.firstPublicationDate,
+      source: r.source,
+    })),
+  });
 }
 
 /* ── GET /api/digests ─────────────────────────────────────── */
