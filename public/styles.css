@@ -80,7 +80,13 @@ p { margin: 0; }
   margin-top: 2px; color: #64748b; font-size: .875rem;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.header-settings-btn {
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.header-btn {
   width: 34px; height: 34px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -90,10 +96,10 @@ p { margin: 0; }
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  flex-shrink: 0;
   transition: all .15s;
 }
-.header-settings-btn:hover { background: #f4f4f5; }
+.header-btn:hover { background: #f4f4f5; }
+.header-btn.active { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
 
 /* ── Buttons ──────────────────────────────────────────────── */
 .btn {
@@ -132,6 +138,51 @@ p { margin: 0; }
   transition: opacity .25s;
 }
 .overlay.show { opacity: 1; }
+
+/* ── Login Modal ──────────────────────────────────────────── */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 28px;
+  width: 380px;
+  max-width: 90vw;
+}
+.modal-card h3 { font-size: 1.05rem; margin-bottom: 6px; }
+.modal-hint { color: var(--text2); font-size: .825rem; margin-bottom: 14px; }
+.modal-card .input { margin-bottom: 16px; }
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+/* ── Drawer Login Prompt ──────────────────────────────────── */
+.drawer-login-prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  background: var(--amber-soft);
+  border: 1px solid #fcd34d;
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+.drawer-login-prompt p {
+  font-size: .825rem;
+  color: var(--amber);
+  font-weight: 500;
+}
 
 /* ── Drawer ───────────────────────────────────────────────── */
 .drawer {

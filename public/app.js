@@ -51,40 +51,123 @@ const DEMO_DATA = {
 };
 
 /* ── State ────────────────────────────────────────────────── */
-const S = { token: localStorage.getItem('oncopaper_admin_token') || '' };
+const S = {
+  token: localStorage.getItem('oncopaper_admin_token') || '',
+  isLoggedIn: false,
+};
 
 /* ── DOM refs ─────────────────────────────────────────────── */
 const $ = (s) => document.querySelector(s);
-const overlay = $('#overlay');
-const drawer = $('#settingsDrawer');
-const toast = $('#toast');
 
 /* ── Init ─────────────────────────────────────────────────── */
 document.addEventListener('DOMContentLoaded', () => {
-  if (DEMO) {
-    renderArticles(DEMO_DATA);
-    showDemoBanner();
-    return;
-  }
+  if (DEMO) { renderArticles(DEMO_DATA); showDemoBanner(); return; }
 
-  // 恢复 token
-  const tokenInput = $('#adminToken');
-  if (S.token) tokenInput.value = S.token;
-  tokenInput.addEventListener('input', () => {
-    S.token = tokenInput.value.trim();
-    localStorage.setItem('oncopaper_admin_token', S.token);
-  });
+  // 尝试用已存储的 token 验证登录
+  if (S.token) verifyToken();
 
-  // 事件
+  // 顶栏按钮
   $('#settingsBtn').addEventListener('click', openDrawer);
+  $('#loginBtn').addEventListener('click', openLogin);
+  $('#logoutBtn').addEventListener('click', doLogout);
+
+  // 登录弹窗
+  $('#loginConfirmBtn').addEventListener('click', doLogin);
+  $('#loginCancelBtn').addEventListener('click', closeLogin);
+  $('#loginTokenInput').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+  // 抽屉
   $('#closeDrawerBtn').addEventListener('click', closeDrawer);
   overlay.addEventListener('click', closeDrawer);
   $('#saveConfigBtn').addEventListener('click', saveConfig);
   $('#syncBtn').addEventListener('click', triggerSync);
   $('#emptySettingsBtn').addEventListener('click', openDrawer);
+  $('#drawerLoginBtn').addEventListener('click', openLogin);
 
   loadLatest();
 });
+
+/* ── Auth ─────────────────────────────────────────────────── */
+function updateAuthUI() {
+  if (S.isLoggedIn) {
+    $('#loginBtn').hidden = true;
+    $('#logoutBtn').hidden = false;
+    $('#settingsBtn').classList.add('active');
+    $('#saveConfigBtn').disabled = false;
+    $('#syncBtn').disabled = false;
+    const prompt = $('#drawerLoginPrompt');
+    if (prompt) prompt.hidden = true;
+  } else {
+    $('#loginBtn').hidden = false;
+    $('#logoutBtn').hidden = true;
+    $('#settingsBtn').classList.remove('active');
+    $('#saveConfigBtn').disabled = true;
+    $('#syncBtn').disabled = true;
+    const prompt = $('#drawerLoginPrompt');
+    if (prompt) prompt.hidden = false;
+  }
+}
+
+async function verifyToken() {
+  try {
+    // 调用 settings 接口验证 token
+    await api('/settings');
+    S.isLoggedIn = true;
+    updateAuthUI();
+  } catch {
+    S.isLoggedIn = false;
+    S.token = '';
+    localStorage.removeItem('oncopaper_admin_token');
+    updateAuthUI();
+  }
+}
+
+function openLogin() {
+  $('#loginModal').hidden = false;
+  $('#loginTokenInput').value = '';
+  $('#loginMsg').hidden = true;
+  $('#loginTokenInput').focus();
+}
+
+function closeLogin() {
+  $('#loginModal').hidden = true;
+}
+
+async function doLogin() {
+  const token = $('#loginTokenInput').value.trim();
+  if (!token) { showLoginMsg('请输入令牌', 'error'); return; }
+
+  S.token = token;
+  try {
+    await api('/settings');
+    S.isLoggedIn = true;
+    localStorage.setItem('oncopaper_admin_token', token);
+    updateAuthUI();
+    closeLogin();
+    showToast('✅ 已登录', 'success');
+    // 如果抽屉开着，刷新表单
+    if (!drawer.hidden) loadSettingsIntoForm();
+  } catch {
+    S.token = '';
+    S.isLoggedIn = false;
+    showLoginMsg('令牌不正确', 'error');
+  }
+}
+
+function doLogout() {
+  S.token = '';
+  S.isLoggedIn = false;
+  localStorage.removeItem('oncopaper_admin_token');
+  updateAuthUI();
+  showToast('已退出登录');
+}
+
+function showLoginMsg(text, type) {
+  const el = $('#loginMsg');
+  el.textContent = text;
+  el.className = `drawer-message ${type}`;
+  el.hidden = false;
+}
 
 /* ── Drawer ───────────────────────────────────────────────── */
 async function openDrawer() {
@@ -95,6 +178,7 @@ async function openDrawer() {
     drawer.classList.add('open');
   });
   await loadSettingsIntoForm();
+  updateAuthUI();
 }
 
 function closeDrawer() {
@@ -126,7 +210,7 @@ async function loadLatest() {
     if (!data.digest) { showEmpty(); return; }
     if (data.digest.status !== 'ok' || !data.articles.length) { showEmpty(data.digest.status); return; }
     renderArticles(data);
-  } catch (e) {
+  } catch {
     showEmpty('error');
   }
 }
@@ -134,7 +218,6 @@ async function loadLatest() {
 function renderArticles(data) {
   const { digest, articles } = data;
 
-  // 状态栏
   const bar = $('#statusBar');
   bar.hidden = false;
   const tag = $('#statusTag');
@@ -143,14 +226,12 @@ function renderArticles(data) {
   $('#statusMeta').textContent = `从 ${digest.candidate_count} 篇候选中选出 ${articles.length} 篇`;
   $('#statusDate').textContent = new Date(digest.run_at).toLocaleString('zh-CN');
 
-  // AI 评分说明
   $('#statusAiNote').innerHTML = `
     <span class="ai-badge">🤖 AI 评分</span>
     <span>由 <strong>Llama 3.1 8B</strong>（Cloudflare Workers AI）对 ${digest.candidate_count} 篇候选论文逐篇评分。
     每篇文章的「为什么值得看」「机制链」「关键证据」「疑点」「下一步实验」均为 AI 基于摘要的独立判断，并非从原文提取。</span>
   `;
 
-  // 文章
   $('#articlesList').innerHTML = articles.map(a => `
     <article class="article-card">
       <div class="article-head">
@@ -255,16 +336,17 @@ function showDemoBanner() {
 async function loadSettingsIntoForm() {
   try {
     const s = await api('/settings');
-    $('#queryGroups').value = (s.query_groups || []).join('\n');
     $('#focus').value = s.focus || '';
+    $('#queryGroups').value = (s.query_groups || []).join('\n');
     $('#excludeTerms').value = s.exclude_terms || '';
     $('#maxArticles').value = s.max_articles || 5;
     $('#lookbackDays').value = s.lookback_days || 7;
     $('#excludeReviews').checked = s.exclude_reviews !== 0;
-  } catch { /* D1 may not be ready */ }
+  } catch { /* 可能未初始化，忽略 */ }
 }
 
 async function saveConfig() {
+  if (!S.isLoggedIn) { showToast('请先登录', 'error'); return; }
   try {
     const queryGroups = $('#queryGroups').value.split('\n').map(s => s.trim()).filter(Boolean);
     const body = {
@@ -283,6 +365,7 @@ async function saveConfig() {
 }
 
 async function triggerSync() {
+  if (!S.isLoggedIn) { showToast('请先登录', 'error'); return; }
   const btn = $('#syncBtn');
   const orig = btn.innerHTML;
   btn.disabled = true;
@@ -315,12 +398,16 @@ function showDrawerMsg(text, type) {
 
 /* ── Toast ────────────────────────────────────────────────── */
 function showToast(text, type = '') {
+  const toast = $('#toast');
   toast.textContent = text;
   toast.className = `toast ${type} show`;
   setTimeout(() => { toast.className = 'toast'; }, 2500);
 }
 
 /* ── Utils ────────────────────────────────────────────────── */
+const overlay = $('#overlay');
+const drawer = $('#settingsDrawer');
+
 function esc(s) {
   if (!s) return '';
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
