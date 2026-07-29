@@ -143,13 +143,16 @@ async function handleGenerateProfile(request, env) {
   if (!pmids.length) return json({ error: 'No PMIDs provided' }, 400);
 
   const papers = await fetchEuropePMCByPMIDs(pmids);
+  console.log(`Fetched ${papers.length}/${pmids.length} papers from Europe PMC`);
   if (!papers.length) return json({ error: 'No papers found for given PMIDs' }, 404);
 
   try {
     const result = await generateProfile(env, papers);
+    console.log(`Profile generated with model ${result.model}`);
     return json(result);
   } catch (e) {
-    return json({ error: friendlyError(e.message) }, 500);
+    console.error(`Generate profile error: ${e.message}`, e.stack?.slice(0, 300));
+    return json({ error: friendlyError(e.message), detail: e.message }, 500);
   }
 }
 

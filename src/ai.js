@@ -76,17 +76,21 @@ export async function runAI(env, messages, options = {}) {
   for (const model of chain) {
     try {
       const params = { messages, temperature, max_completion_tokens: maxCompletionTokens };
+      console.log(`[AI] trying ${model}, tokens=${maxCompletionTokens}`);
       const result = await env.AI.run(model, params);
 
       const text = extractText(result);
+      console.log(`[AI] ${model} text len=${text?.length || 0}`);
+
       if (!text || text.trim().length < 3) {
-        throw new Error(`Model returned empty or short text`);
+        const keys = Object.keys(result || {});
+        throw new Error(`Empty response from ${model}. Keys: ${keys.join(',')}`);
       }
 
       return { text: text.trim(), model };
     } catch (err) {
       lastError = err;
-      console.error(`AI model failed: ${model}`, err.message);
+      console.error(`[AI] ${model} FAILED: ${err.message}`);
     }
   }
 
