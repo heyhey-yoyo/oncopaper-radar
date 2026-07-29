@@ -4,15 +4,13 @@
    ============================================================ */
 
 // ── Model chain ────────────────────────────────────────────
-// Scoring benefits from GLM's reasoning; profile generation prefers Qwen's speed
 const GLM    = '@cf/zai-org/glm-4.7-flash';
 const QWEN   = '@cf/qwen/qwen3-30b-a3b-fp8';
 const GRANITE = '@cf/ibm-granite/granite-4.0-h-micro';
 
-// Scoring: GLM first (reasoning helps nuanced evaluation)
-const SCORE_CHAIN = [GLM, QWEN, GRANITE];
-// Profile/profile generation: Qwen first (no reasoning overhead, faster)
-const PROFILE_CHAIN = [QWEN, GLM, GRANITE];
+// All tasks: GLM first (reasoning yields better analysis), Qwen fallback, Granite last
+// Daily quota: profile + scoring ≈ 300 Neurons, free tier 10,000/day
+const MODEL_CHAIN = [GLM, QWEN, GRANITE];
 
 // ── Prompt version (bump to invalidate caches) ──────────────
 export const PROMPT_VERSION = '2026-07-29-v1';
@@ -69,7 +67,7 @@ export async function runAI(env, messages, options = {}) {
   const {
     temperature = 0.1,
     maxCompletionTokens = 3000,
-    chain = SCORE_CHAIN,  // default to scoring chain (GLM first)
+    chain = MODEL_CHAIN,
   } = options;
 
   let lastError = null;
@@ -98,7 +96,7 @@ export async function runAI(env, messages, options = {}) {
 export async function runAIForJSON(env, messages, options = {}) {
   const { text, model } = await runAI(env, messages, {
     ...options,
-    chain: options.chain ?? SCORE_CHAIN,
+    chain: options.chain ?? MODEL_CHAIN,
     temperature: options.temperature ?? 0.1,
   });
 
@@ -130,7 +128,7 @@ export async function generateProfile(env, papers) {
     { role: 'user', content: `论文：\n\n${papersText}` },
   ];
 
-  const { parsed, model } = await runAIForJSON(env, messages, { chain: PROFILE_CHAIN, maxCompletionTokens: 4000 });
+  const { parsed, model } = await runAIForJSON(env, messages, { maxCompletionTokens: 8000 });
 
   return {
     focus: parsed.researcherProfile || '',
