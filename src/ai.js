@@ -64,20 +64,20 @@ function parseJSON(text) {
 export async function runAI(env, messages, options = {}) {
   const {
     temperature = 0.1,
-    maxCompletionTokens = 500,
-    reasoningEffort = 'low',
+    maxCompletionTokens = 1000,
+    reasoningEffort = null,
   } = options;
 
   let lastError = null;
 
   for (const model of MODEL_CHAIN) {
     try {
-      const result = await env.AI.run(model, {
-        messages,
-        temperature,
-        max_completion_tokens: maxCompletionTokens,
-        reasoning_effort: reasoningEffort,
-      });
+      const params = { messages, temperature, max_completion_tokens: maxCompletionTokens };
+      // GLM reasoning model: use json_object to bypass reasoning and get direct JSON in content
+      if (model.includes('glm')) {
+        params.response_format = { type: 'json_object' };
+      }
+      const result = await env.AI.run(model, params);
 
       const text = extractText(result);
       if (!text || text.trim().length < 3) {
@@ -107,6 +107,22 @@ export async function runAIForJSON(env, messages, options = {}) {
   }
 
   return { parsed, model };
+}
+
+// ── Extract text from model response ────────────────────────
+// GLM-4.7-Flash uses reasoning_content; other models use content.
+// When max_tokens is sufficient, GLM puts final answer in content.
+function extractResult(result) {
+  const text = extractText(result);
+  // Try to extract just the final JSON — GLM may prepend reasoning
+  if (text) {
+    // If the text contains both reasoning and JSON, try to find the JSON portion
+    const jsonMatch = text.match(/\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}/);
+    if (jsonMatch) return jsonMatch[0];
+    // Fallback: return last 3000 chars (more likely to contain the answer)
+    if (text.length > 3000) return text.slice(-3000);
+  }
+  return text;
 }
 
 // ── Generate researcher profile from PMIDs ──────────────────
