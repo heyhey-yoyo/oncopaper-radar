@@ -274,16 +274,18 @@ p { margin: 0; }
 
 /* ── Status Bar ───────────────────────────────────────────── */
 .status-bar {
+  margin-bottom: 24px;
+  padding: 18px 24px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.status-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 10px;
-  margin-bottom: 24px;
-  padding: 14px 20px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
 }
 .status-left { display: flex; align-items: center; gap: 12px; }
 .status-tag {
@@ -296,6 +298,27 @@ p { margin: 0; }
 .status-tag.warn { background: var(--amber-soft); color: var(--amber); }
 .status-meta { font-size: .825rem; color: var(--text2); }
 .status-date { font-size: .8rem; color: var(--text3); }
+
+.status-ai-note {
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  font-size: .8rem;
+  color: #115e59;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.status-ai-note .ai-badge {
+  background: var(--accent);
+  color: #fff;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: .72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
 
 /* ── Center Message ───────────────────────────────────────── */
 .center-message {

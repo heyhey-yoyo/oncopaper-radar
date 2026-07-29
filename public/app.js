@@ -140,8 +140,15 @@ function renderArticles(data) {
   const tag = $('#statusTag');
   tag.textContent = `入选 ${articles.length} 篇`;
   tag.className = articles.length ? 'status-tag ok' : 'status-tag warn';
-  $('#statusMeta').textContent = `从 ${digest.candidate_count} 篇候选中选出`;
+  $('#statusMeta').textContent = `从 ${digest.candidate_count} 篇候选中选出 ${articles.length} 篇`;
   $('#statusDate').textContent = new Date(digest.run_at).toLocaleString('zh-CN');
+
+  // AI 评分说明
+  $('#statusAiNote').innerHTML = `
+    <span class="ai-badge">🤖 AI 评分</span>
+    <span>由 <strong>Llama 3.1 8B</strong>（Cloudflare Workers AI）对 ${digest.candidate_count} 篇候选论文逐篇评分。
+    每篇文章的「为什么值得看」「机制链」「关键证据」「疑点」「下一步实验」均为 AI 基于摘要的独立判断，并非从原文提取。</span>
+  `;
 
   // 文章
   $('#articlesList').innerHTML = articles.map(a => `
