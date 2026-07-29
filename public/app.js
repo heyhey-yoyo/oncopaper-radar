@@ -92,6 +92,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initial load
   if (S.token) verifyToken().then(() => loadLatest());
   else { updateAuthUI(); loadLatest(); }
+
+  // Quota reset countdown
+  updateQuotaTimer();
+  setInterval(updateQuotaTimer, 30000);
 });
 
 /* ── Auth ─────────────────────────────────────────────────── */
@@ -460,6 +464,17 @@ function showToast(text, type = '') {
     toast.className = 'toast';
     setTimeout(() => { toast.hidden = true; }, 300);
   }, 2500);
+}
+
+/* ── Quota Timer ──────────────────────────────────────────── */
+function updateQuotaTimer() {
+  const now = new Date();
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+  const diff = next - now;
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  const s = Math.floor((diff % 60000) / 1000);
+  $('#quotaReset').textContent = `Quota resets in ${h}h ${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`;
 }
 
 /* ── Utils ────────────────────────────────────────────────── */

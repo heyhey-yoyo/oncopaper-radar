@@ -88,6 +88,12 @@ p { margin: 0; }
   gap: 8px;
   flex-shrink: 0;
 }
+.quota-reset {
+  font-size: .72rem;
+  color: var(--text3);
+  white-space: nowrap;
+  padding: 0 4px;
+}
 .header-btn {
   width: 34px; height: 34px;
   border: 1px solid var(--line);
