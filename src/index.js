@@ -19,6 +19,9 @@ export default {
     if (path === '/api/debug/sync' && request.method === 'GET') {
       return handleDebugSync(env);
     }
+    if (path === '/api/debug/ai' && request.method === 'GET') {
+      return handleDebugAI(env);
+    }
     if (path === '/api/digests' && request.method === 'GET') {
       return handleGetDigests(request, env);
     }
@@ -191,6 +194,34 @@ async function handleDebugSync(env) {
       source: r.source,
     })),
   });
+}
+
+/* ── GET /api/debug/ai ────────────────────────────────────── */
+async function handleDebugAI(env) {
+  const model = env.AI_MODEL || '@cf/meta/llama-3.1-8b-instruct-fast';
+  try {
+    const result = await env.AI.run(model, {
+      messages: [
+        { role: 'system', content: '用 JSON 回复，格式：{"status":"ok"}' },
+        { role: 'user', content: '回复 {"status":"ok"}' },
+      ],
+      response_format: { type: 'json_object' },
+      max_tokens: 100,
+    });
+    return json({
+      model,
+      ai_ok: true,
+      raw_type: typeof result,
+      response: result,
+    });
+  } catch (e) {
+    return json({
+      model,
+      ai_ok: false,
+      error: e.message,
+      stack: e.stack?.slice(0, 500),
+    }, 500);
+  }
 }
 
 /* ── GET /api/digests ─────────────────────────────────────── */
@@ -447,7 +478,7 @@ async function scoreWithAI(env, articles, focus, maxArticles) {
       rank: i + 1,
       relevance: 5, novelty: 5, evidence: 5, surprise: 5, experiment_value: 5, total: 25,
       evidence_level: '中',
-      why_interesting: 'AI 评分暂时不可用，请稍后重试',
+      why_interesting: `AI 评分暂时不可用：${e.message}`,
       mechanism_chain: '', key_evidence: '', major_concern: '', next_experiment: '',
     }));
   }
