@@ -23,7 +23,8 @@ export default {
       return handleGetLatestDigest(request, env);
     }
 
-    return json({ error: 'Not found' }, 404);
+    // 静态资源：透传并加正确的 charset
+    return serveAssets(request, env);
   },
 
   async scheduled(_event, env) {
@@ -53,6 +54,31 @@ function json(data, status = 200) {
     'Access-Control-Allow-Origin': '*',
   };
   return new Response(body, { status, headers });
+}
+
+/* ── 静态资源（加 charset）──────────────────────────────── */
+async function serveAssets(request, env) {
+  const res = await env.ASSETS.fetch(request);
+  const ct = res.headers.get('Content-Type') || '';
+
+  // 对文本类资源补 charset=utf-8，解决中文乱码
+  if (ct.startsWith('text/html') && !ct.includes('charset')) {
+    return fixCharset(res, 'text/html; charset=utf-8');
+  }
+  if (ct.startsWith('text/css') && !ct.includes('charset')) {
+    return fixCharset(res, 'text/css; charset=utf-8');
+  }
+  if (ct.startsWith('text/javascript') && !ct.includes('charset')) {
+    return fixCharset(res, 'text/javascript; charset=utf-8');
+  }
+
+  return res;
+}
+
+function fixCharset(res, contentType) {
+  const headers = new Headers(res.headers);
+  headers.set('Content-Type', contentType);
+  return new Response(res.body, { status: res.status, headers });
 }
 
 /* ── 认证 ─────────────────────────────────────────────────── */
