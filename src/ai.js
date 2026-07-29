@@ -26,22 +26,24 @@ export const MODEL_LABELS = {
 };
 
 // ── Extract text from Workers AI response ──────────────────
-function extractText(result) {
-  if (typeof result === 'string') return result;
-  if (!result || typeof result !== 'object') return null;
+function extractTexts(result) {
+  // Returns { primary, fallback } — primary is content (most models put answer here)
+  // fallback is reasoning_content (GLM may put answer here if content is reasoning)
+  if (typeof result === 'string') return { primary: result };
+  if (!result || typeof result !== 'object') return {};
 
   const msg = result.choices?.[0]?.message
            || result.response?.choices?.[0]?.message;
   if (!msg) {
-    if (typeof result.response === 'string') return result.response;
-    return null;
+    if (typeof result.response === 'string') return { primary: result.response };
+    return {};
   }
 
-  // content FIRST (Qwen puts final answer in content, reasoning in reasoning_content)
-  // reasoning_content as fallback (GLM may put answer in reasoning_content, content=null)
-  const text = msg.content || msg.reasoning_content || msg.reasoning;
-  if (typeof text === 'string' && text.length > 5) return text;
-  return null;
+  return {
+    primary: typeof msg.content === 'string' ? msg.content : null,
+    fallback: typeof msg.reasoning_content === 'string' ? msg.reasoning_content
+           : typeof msg.reasoning === 'string' ? msg.reasoning : null,
+  };
 }
 
 // ── JSON extraction with markdown guard ─────────────────────
@@ -80,15 +82,17 @@ export async function runAI(env, messages, options = {}) {
       console.log(`[AI] trying ${model}, tokens=${maxCompletionTokens}`);
       const result = await env.AI.run(model, params);
 
-      const text = extractText(result);
-      console.log(`[AI] ${model} text len=${text?.length || 0}`);
+      const texts = extractTexts(result);
+      const primary = texts.primary?.trim();
+      const fallback = texts.fallback?.trim();
+      console.log(`[AI] ${model} primary=${primary?.length || 0} fallback=${fallback?.length || 0}`);
 
-      if (!text || text.trim().length < 3) {
+      if ((!primary || primary.length < 3) && (!fallback || fallback.length < 3)) {
         const keys = Object.keys(result || {});
         throw new Error(`Empty response from ${model}. Keys: ${keys.join(',')}`);
       }
 
-      return { text: text.trim(), model };
+      return { text: primary || '', fallbackText: fallback || '', model };
     } catch (err) {
       lastError = err;
       console.error(`[AI] ${model} FAILED: ${err.message}`);
@@ -100,16 +104,23 @@ export async function runAI(env, messages, options = {}) {
 
 // ── Run and parse JSON ─────────────────────────────────────
 export async function runAIForJSON(env, messages, options = {}) {
-  const { text, model } = await runAI(env, messages, {
+  const { text, fallbackText, model } = await runAI(env, messages, {
     ...options,
     chain: options.chain ?? MODEL_CHAIN,
     temperature: options.temperature ?? 0.1,
   });
 
-  const parsed = parseJSON(text);
-  if (!parsed) {
-    throw new Error(`Cannot parse JSON from model ${model}. Raw: ${text.slice(0, 200)}`);
+  // Try primary text first (content field), then fallback (reasoning_content)
+  let parsed = parseJSON(text);
+  let source = 'content';
+  if (!parsed && fallbackText) {
+    parsed = parseJSON(fallbackText);
+    source = 'reasoning_content';
   }
+  if (!parsed) {
+    throw new Error(`Cannot parse JSON from ${model}. Content: ${text.slice(0, 150)}... Fallback: ${(fallbackText||'').slice(0, 150)}`);
+  }
+  console.log(`[AI] JSON parsed from ${source}, fields: ${Object.keys(parsed).join(',')}`);
 
   return { parsed, model };
 }
