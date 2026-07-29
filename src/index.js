@@ -73,8 +73,8 @@ function requireAdmin(request, env) {
 /* ── GET /api/model-info ──────────────────────────────────── */
 function handleModelInfo() {
   return json({
-    primary: '@cf/zai-org/glm-4.7-flash',
-    fallback: '@cf/qwen/qwen3-30b-a3b-fp8',
+    primary: '@cf/qwen/qwen3-30b-a3b-fp8',
+    fallback: '@cf/zai-org/glm-4.7-flash',
     cheap_fallback: '@cf/ibm-granite/granite-4.0-h-micro',
     provider: 'Cloudflare Workers AI',
     mode: 'Free tier priority',
@@ -184,7 +184,7 @@ async function handleDebugSync(env) {
 /* ── GET /api/debug/ai ────────────────────────────────────── */
 async function handleDebugAI(env) {
   try {
-    const result = await env.AI.run('@cf/zai-org/glm-4.7-flash', {
+    const result = await env.AI.run('@cf/qwen/qwen3-30b-a3b-fp8', {
       messages: [{ role: 'system', content: 'Reply with JSON: {"status":"ok"}' }, { role: 'user', content: '{"status":"ok"}' }],
       max_completion_tokens: 500,
     });

@@ -4,8 +4,9 @@
    ============================================================ */
 
 // ── Model chain ────────────────────────────────────────────
-const PRIMARY_MODEL   = '@cf/zai-org/glm-4.7-flash';
-const FALLBACK_MODEL  = '@cf/qwen/qwen3-30b-a3b-fp8';
+// Qwen first (no reasoning overhead, cheaper), GLM as primary fallback, Granite last
+const PRIMARY_MODEL   = '@cf/qwen/qwen3-30b-a3b-fp8';
+const FALLBACK_MODEL  = '@cf/zai-org/glm-4.7-flash';
 const CHEAP_FALLBACK  = '@cf/ibm-granite/granite-4.0-h-micro';
 
 const MODEL_CHAIN = [PRIMARY_MODEL, FALLBACK_MODEL, CHEAP_FALLBACK];
@@ -15,9 +16,9 @@ export const PROMPT_VERSION = '2026-07-29-v1';
 
 // ── Model display names ─────────────────────────────────────
 export const MODEL_LABELS = {
-  [PRIMARY_MODEL]:  'GLM-4.7-Flash',
-  [FALLBACK_MODEL]: 'Qwen3-30B-A3B',
-  [CHEAP_FALLBACK]: 'Granite 4.0 H Micro',
+  '@cf/qwen/qwen3-30b-a3b-fp8':          'Qwen3-30B-A3B',
+  '@cf/zai-org/glm-4.7-flash':           'GLM-4.7-Flash',
+  '@cf/ibm-granite/granite-4.0-h-micro': 'Granite 4.0 H Micro',
 };
 
 // ── Extract text from Workers AI response ──────────────────
@@ -108,28 +109,24 @@ export async function runAIForJSON(env, messages, options = {}) {
 // ── Generate researcher profile from PMIDs ──────────────────
 export async function generateProfile(env, papers) {
   const papersText = papers.map((p, i) =>
-    `${i + 1}. [PMID: ${p.pmid}] ${p.title}\n   ${(p.abstract || '').slice(0, 1000)}`
+    `${i + 1}. [PMID: ${p.pmid}] ${p.title}\n   ${(p.abstract || '').slice(0, 800)}`
   ).join('\n\n');
 
-  const { parsed, model } = await runAIForJSON(env, [
-    { role: 'system', content: `你是肿瘤分子机制领域的资深研究者。用户提供了他们感兴趣的论文列表，请分析并生成：
+  const messages = [
+    { role: 'system', content: `你是肿瘤分子机制领域的研究者。根据用户感兴趣的论文列表，直接输出 JSON（不要推理过程）：
 
-1. researcherProfile: 中文描述，总结研究兴趣、方法论偏好和关注点（150-300字）
-2. concepts: 提取核心基因/通路/疾病/表型关键词。外层数组为 AND 关系，内层数组同一概念的同义词（OR 关系）。
-3. excludeTerms: 应排除的术语列表
-4. rationale: 简短的生成依据
-
-输出 JSON：
 {
-  "researcherProfile": "...",
+  "researcherProfile": "中文研究兴趣描述（150-300字）",
   "concepts": [["同义词1 | 同义词2"], ["同义词3"]],
   "excludeTerms": ["排除词1", "排除词2"],
-  "rationale": "..."
+  "rationale": "简短生成依据"
 }
 
-只输出 JSON，不要任何额外文字。不得虚构 PMID 中不存在的研究方向。保留英文专业术语。` },
-    { role: 'user', content: `感兴趣的论文：\n\n${papersText}` },
-  ], { maxCompletionTokens: 4000 });
+外层数组为 AND，内层为 OR 同义词。不得虚构方向。` },
+    { role: 'user', content: `论文：\n\n${papersText}` },
+  ];
+
+  const { parsed, model } = await runAIForJSON(env, messages, { maxCompletionTokens: 4000 });
 
   return {
     focus: parsed.researcherProfile || '',
