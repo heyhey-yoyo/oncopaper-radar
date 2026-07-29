@@ -403,7 +403,8 @@ async function loadModelInfo() {
 
 /* ── AI Profile Generation ────────────────────────────────── */
 async function generateProfile() {
-  if (!S.isLoggedIn) { showToast('Please login first', 'error'); return; }
+  console.log('generateProfile called, loggedIn:', S.isLoggedIn, 'token:', !!S.token);
+  if (!S.isLoggedIn) { showToast('Please login first. Use the login button in the header.', 'error'); return; }
 
   const raw = $('#pmidInput').value.trim();
   if (!raw) { showGenerateMsg('Please enter at least one PMID', 'error'); return; }
@@ -452,9 +453,13 @@ function showDrawerMsg(text, type) {
 /* ── Toast ────────────────────────────────────────────────── */
 function showToast(text, type = '') {
   const toast = $('#toast');
+  toast.hidden = false;
   toast.textContent = text;
   toast.className = `toast ${type} show`;
-  setTimeout(() => { toast.className = 'toast'; }, 2500);
+  setTimeout(() => {
+    toast.className = 'toast';
+    setTimeout(() => { toast.hidden = true; }, 300);
+  }, 2500);
 }
 
 /* ── Utils ────────────────────────────────────────────────── */
