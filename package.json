@@ -1,0 +1,18 @@
+{
+  "name": "oncopaper-radar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Workers AI + D1 demo for daily oncology literature discovery",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init:local": "wrangler d1 execute oncopaper-radar --local --file=./schema.sql",
+    "db:init:remote": "wrangler d1 execute oncopaper-radar --remote --file=./schema.sql",
+    "db:show:local": "wrangler d1 execute oncopaper-radar --local --command=\"SELECT * FROM settings;\"",
+    "db:show:remote": "wrangler d1 execute oncopaper-radar --remote --command=\"SELECT * FROM settings;\""
+  },
+  "devDependencies": {
+    "wrangler": "^4.26.0"
+  }
+}
