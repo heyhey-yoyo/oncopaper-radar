@@ -3,6 +3,10 @@
   "name": "oncopaper-radar",
   "main": "./src/index.js",
   "compatibility_date": "2026-07-29",
+
+  "workers_dev": true,
+  "preview_urls": true,
+
   "observability": {
     "enabled": true
   },
