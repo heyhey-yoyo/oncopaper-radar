@@ -1,38 +1,23 @@
+import { generateProfile, scorePapers, asyncPool, MODEL_LABELS } from './ai.js';
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // CORS 预检
     if (request.method === 'OPTIONS') return cors();
 
-    // API 路由
-    if (path === '/api/settings' && request.method === 'GET') {
-      return handleGetSettings(env);
-    }
-    if (path === '/api/settings' && request.method === 'POST') {
-      return handleSaveSettings(request, env);
-    }
-    if (path === '/api/sync' && request.method === 'POST') {
-      return handleSync(request, env);
-    }
-    if (path === '/api/generate-profile' && request.method === 'POST') {
-      return handleGenerateProfile(request, env);
-    }
-    if (path === '/api/debug/sync' && request.method === 'GET') {
-      return handleDebugSync(env);
-    }
-    if (path === '/api/debug/ai' && request.method === 'GET') {
-      return handleDebugAI(env);
-    }
-    if (path === '/api/digests' && request.method === 'GET') {
-      return handleGetDigests(request, env);
-    }
-    if (path === '/api/digests/latest' && request.method === 'GET') {
-      return handleGetLatestDigest(request, env);
-    }
+    // API routes
+    if (path === '/api/settings'    && request.method === 'GET')  return handleGetSettings(env);
+    if (path === '/api/settings'    && request.method === 'POST') return handleSaveSettings(request, env);
+    if (path === '/api/sync'       && request.method === 'POST') return handleSync(request, env);
+    if (path === '/api/generate-profile' && request.method === 'POST') return handleGenerateProfile(request, env);
+    if (path === '/api/debug/sync'  && request.method === 'GET')  return handleDebugSync(env);
+    if (path === '/api/debug/ai'    && request.method === 'GET')  return handleDebugAI(env);
+    if (path === '/api/digests'     && request.method === 'GET')  return handleGetDigests(request, env);
+    if (path === '/api/digests/latest' && request.method === 'GET') return handleGetLatestDigest(request, env);
+    if (path === '/api/model-info'  && request.method === 'GET')  return handleModelInfo();
 
-    // 静态资源：透传并加正确的 charset
     return serveAssets(request, env);
   },
 
@@ -47,7 +32,7 @@ export default {
   },
 };
 
-/* ── CORS ─────────────────────────────────────────────────── */
+/* ── CORS & JSON ──────────────────────────────────────────── */
 function cors(headers) {
   const h = new Headers(headers);
   h.set('Access-Control-Allow-Origin', '*');
@@ -57,45 +42,43 @@ function cors(headers) {
 }
 
 function json(data, status = 200) {
-  const body = JSON.stringify(data);
-  const headers = {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-  };
-  return new Response(body, { status, headers });
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+  });
 }
 
-/* ── 静态资源（加 charset）──────────────────────────────── */
+/* ── Static assets ───────────────────────────────────────── */
 async function serveAssets(request, env) {
   const res = await env.ASSETS.fetch(request);
   const ct = res.headers.get('Content-Type') || '';
-
-  // 对文本类资源补 charset=utf-8，解决中文乱码
-  if (ct.startsWith('text/html') && !ct.includes('charset')) {
-    return fixCharset(res, 'text/html; charset=utf-8');
+  const types = { 'text/html': 'text/html; charset=utf-8', 'text/css': 'text/css; charset=utf-8', 'text/javascript': 'text/javascript; charset=utf-8' };
+  for (const [key, val] of Object.entries(types)) {
+    if (ct.startsWith(key) && !ct.includes('charset')) {
+      const h = new Headers(res.headers);
+      h.set('Content-Type', val);
+      return new Response(res.body, { status: res.status, headers: h });
+    }
   }
-  if (ct.startsWith('text/css') && !ct.includes('charset')) {
-    return fixCharset(res, 'text/css; charset=utf-8');
-  }
-  if (ct.startsWith('text/javascript') && !ct.includes('charset')) {
-    return fixCharset(res, 'text/javascript; charset=utf-8');
-  }
-
   return res;
 }
 
-function fixCharset(res, contentType) {
-  const headers = new Headers(res.headers);
-  headers.set('Content-Type', contentType);
-  return new Response(res.body, { status: res.status, headers });
-}
-
-/* ── 认证 ─────────────────────────────────────────────────── */
+/* ── Auth ─────────────────────────────────────────────────── */
 function requireAdmin(request, env) {
   const token = request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '');
-  if (!env.ADMIN_TOKEN) return true; // 未设令牌则跳过
-  if (!token || token !== env.ADMIN_TOKEN) return false;
-  return true;
+  if (!env.ADMIN_TOKEN) return true;
+  return !!(token && token === env.ADMIN_TOKEN);
+}
+
+/* ── GET /api/model-info ──────────────────────────────────── */
+function handleModelInfo() {
+  return json({
+    primary: '@cf/zai-org/glm-4.7-flash',
+    fallback: '@cf/qwen/qwen3-30b-a3b-fp8',
+    cheap_fallback: '@cf/ibm-granite/granite-4.0-h-micro',
+    provider: 'Cloudflare Workers AI',
+    mode: 'Free tier priority',
+  });
 }
 
 /* ── GET /api/settings ────────────────────────────────────── */
@@ -117,7 +100,6 @@ async function handleGetSettings(env) {
 /* ── POST /api/settings ───────────────────────────────────── */
 async function handleSaveSettings(request, env) {
   if (!requireAdmin(request, env)) return json({ error: 'Unauthorized' }, 401);
-
   let body;
   try { body = await request.json(); } catch { return json({ error: 'Bad JSON' }, 400); }
 
@@ -147,110 +129,28 @@ async function handleSync(request, env) {
     const result = await runSync(env);
     return json(result);
   } catch (e) {
-    return json({ status: 'error', error: e.message }, 500);
+    return json({ status: 'error', error: friendlyError(e.message) }, 500);
   }
 }
 
-/* ── POST /api/generate-profile ────────────────────────────── */
+/* ── POST /api/generate-profile ───────────────────────────── */
 async function handleGenerateProfile(request, env) {
   if (!requireAdmin(request, env)) return json({ error: 'Unauthorized' }, 401);
-
   let body;
   try { body = await request.json(); } catch { return json({ error: 'Bad JSON' }, 400); }
 
   const pmids = (body.pmids || []).map(p => String(p).trim()).filter(Boolean);
   if (!pmids.length) return json({ error: 'No PMIDs provided' }, 400);
 
-  // 从 Europe PMC 获取论文详情
   const papers = await fetchEuropePMCByPMIDs(pmids);
   if (!papers.length) return json({ error: 'No papers found for given PMIDs' }, 404);
 
-  // 构造 AI prompt
-  const papersText = papers.map((p, i) =>
-    `${i + 1}. [PMID: ${p.pmid}] ${p.title}\n   ${(p.abstract || '').slice(0, 1000)}`
-  ).join('\n\n');
-
-  const model = env.AI_MODEL || '@cf/meta/llama-3.1-8b-instruct-fast';
-
-  const systemPrompt = `你是肿瘤分子机制领域的资深研究者。用户提供了他们感兴趣的论文列表，请根据这些论文生成：
-
-1. 研究者画像：一段中文描述，总结这些论文反映的研究兴趣、方法论偏好和关注点（150-300字）
-2. 检索概念：提取核心基因/通路/疾病/表型关键词，每行一个概念，同义词用 | 分隔
-
-输出 JSON：
-{
-  "focus": "研究者画像...",
-  "query_groups": ["概念1 | 同义词1", "概念2"],
-  "exclude_terms": "排除词1 | 排除词2"
-}`;
-
-  const userMessage = `这些是我感兴趣的论文：\n\n${papersText}\n\n请分析我的研究兴趣，生成研究者画像、检索概念和排除词。只输出 JSON。`;
-
   try {
-    const result = await env.AI.run(model, {
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage },
-      ],
-      max_tokens: 2048,
-    });
-
-    const text = extractTextAI(result);
-    if (!text) throw new Error('Empty AI response');
-
-    const parsed = extractJSONAI(text);
-    if (!parsed) throw new Error('Cannot parse AI response');
-
-    return json({
-      focus: parsed.focus || '',
-      query_groups: parsed.query_groups || [],
-      exclude_terms: parsed.exclude_terms || '',
-    });
+    const result = await generateProfile(env, papers);
+    return json(result);
   } catch (e) {
-    return json({ error: `AI generation failed: ${e.message}` }, 500);
+    return json({ error: friendlyError(e.message) }, 500);
   }
-}
-
-/* ── HELPERS: AI response parsing (shared) ─────────────────── */
-function extractTextAI(result) {
-  const content = result?.choices?.[0]?.message?.content;
-  if (content && typeof content === 'string' && content.length > 5) return content;
-  if (typeof result?.response === 'string' && result.response.length > 5) return result.response;
-  const nested = result?.response?.choices?.[0]?.message?.content;
-  if (nested && typeof nested === 'string' && nested.length > 5) return nested;
-  if (typeof result === 'string' && result.length > 5) return result;
-  return null;
-}
-
-function extractJSONAI(text) {
-  try { return JSON.parse(text); } catch {}
-  const cleaned = text.replace(/```(?:json)?\s*([\s\S]*?)```/g, '$1').trim();
-  try { return JSON.parse(cleaned); } catch {}
-  const objMatch = text.match(/\{[\s\S]*\}/);
-  if (objMatch) { try { return JSON.parse(objMatch[0]); } catch {} }
-  const arrMatch = text.match(/\[[\s\S]*\]/);
-  if (arrMatch) { try { return JSON.parse(arrMatch[0]); } catch {} }
-  return null;
-}
-
-/* ── HELPERS: fetch papers by PMIDs ────────────────────────── */
-async function fetchEuropePMCByPMIDs(pmids) {
-  const query = pmids.map(p => `EXT_ID:${p}`).join(' OR ');
-  const params = new URLSearchParams({
-    query, resultType: 'core', pageSize: String(pmids.length),
-    format: 'json', sort: 'P_PDATE_D desc',
-  });
-  const url = `https://www.ebi.ac.uk/europepmc/webservices/rest/search?${params}`;
-  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
-  if (!res.ok) throw new Error(`Europe PMC HTTP ${res.status}`);
-  const data = await res.json();
-  return (data.resultList?.result ?? []).map(r => ({
-    pmid: r.pmid || '',
-    title: r.title || 'Untitled',
-    abstract: r.abstractText || '',
-    journal: r.journalTitle || '',
-    pub_date: r.firstPublicationDate || r.pubYear || '',
-  }));
 }
 
 /* ── GET /api/debug/sync ──────────────────────────────────── */
@@ -260,72 +160,37 @@ async function handleDebugSync(env) {
 
   const queryGroups = safeParse(settings.query_groups, []);
   const searchQuery = buildEuroPMCQuery(queryGroups, settings.exclude_terms, settings.exclude_reviews);
-
-  // 展示构造的查询
   const date = new Date();
   date.setDate(date.getDate() - (settings.lookback_days || 7));
   const fromDate = date.toISOString().slice(0, 10);
 
-  const params = new URLSearchParams({
-    query: searchQuery,
-    resultType: 'core',
-    pageSize: '50',
-    format: 'json',
-    sort: 'P_PDATE_D desc',
-    fromSearchDate: fromDate,
-  });
-
+  const params = new URLSearchParams({ query: searchQuery, resultType: 'core', pageSize: '50', format: 'json', sort: 'P_PDATE_D desc', fromSearchDate: fromDate });
   const euPmcUrl = `https://www.ebi.ac.uk/europepmc/webservices/rest/search?${params}`;
 
-  // 实际调一次
   let raw;
   try {
-    const res = await fetch(euPmcUrl, { headers: { 'Accept': 'application/json' } });
-    raw = await res.json();
+    raw = await fetch(euPmcUrl, { headers: { 'Accept': 'application/json' } }).then(r => r.json());
   } catch (e) {
     return json({ error: 'Fetch failed', message: e.message }, 500);
   }
 
   return json({
-    query: searchQuery,
-    eupmc_url: euPmcUrl,
-    lookback_days: settings.lookback_days,
-    from_date: fromDate,
-    hit_count: raw?.resultList?.result?.length ?? 0,
-    total_hits: raw?.hitCount ?? 0,
-    sample: (raw?.resultList?.result ?? []).slice(0, 3).map(r => ({
-      title: r.title,
-      pubDate: r.firstPublicationDate,
-      source: r.source,
-    })),
+    query: searchQuery, eupmc_url: euPmcUrl, lookback_days: settings.lookback_days, from_date: fromDate,
+    hit_count: raw?.resultList?.result?.length ?? 0, total_hits: raw?.hitCount ?? 0,
+    sample: (raw?.resultList?.result ?? []).slice(0, 3).map(r => ({ title: r.title, pubDate: r.firstPublicationDate, source: r.source })),
   });
 }
 
 /* ── GET /api/debug/ai ────────────────────────────────────── */
 async function handleDebugAI(env) {
-  const model = env.AI_MODEL || '@cf/meta/llama-3.1-8b-instruct-fast';
   try {
-    const result = await env.AI.run(model, {
-      messages: [
-        { role: 'system', content: '用 JSON 回复，格式：{"status":"ok"}' },
-        { role: 'user', content: '回复 {"status":"ok"}' },
-      ],
-      response_format: { type: 'json_object' },
-      max_tokens: 100,
+    const result = await env.AI.run('@cf/zai-org/glm-4.7-flash', {
+      messages: [{ role: 'system', content: 'Reply with JSON: {"status":"ok"}' }, { role: 'user', content: '{"status":"ok"}' }],
+      max_completion_tokens: 100,
     });
-    return json({
-      model,
-      ai_ok: true,
-      raw_type: typeof result,
-      response: result,
-    });
+    return json({ model: '@cf/zai-org/glm-4.7-flash', ai_ok: true, raw_type: typeof result, response: result });
   } catch (e) {
-    return json({
-      model,
-      ai_ok: false,
-      error: e.message,
-      stack: e.stack?.slice(0, 500),
-    }, 500);
+    return json({ model: '@cf/zai-org/glm-4.7-flash', ai_ok: false, error: e.message }, 500);
   }
 }
 
@@ -333,18 +198,13 @@ async function handleDebugAI(env) {
 async function handleGetDigests(request, env) {
   const url = new URL(request.url);
   const limit = clamp(Number(url.searchParams.get('limit')) || 20, 1, 100);
-  const rows = (await env.DB.prepare(
-    'SELECT * FROM digests ORDER BY run_at DESC LIMIT ?'
-  ).bind(limit).all()).results;
+  const rows = (await env.DB.prepare('SELECT * FROM digests ORDER BY run_at DESC LIMIT ?').bind(limit).all()).results;
   return json(rows);
 }
 
 /* ── GET /api/digests/latest ──────────────────────────────── */
 async function handleGetLatestDigest(request, env) {
-  const digest = await env.DB.prepare(
-    "SELECT * FROM digests WHERE status = 'ok' ORDER BY run_at DESC LIMIT 1"
-  ).first();
-
+  const digest = await env.DB.prepare("SELECT * FROM digests WHERE status = 'ok' ORDER BY run_at DESC LIMIT 1").first();
   if (!digest) {
     const empty = await env.DB.prepare("SELECT * FROM digests ORDER BY run_at DESC LIMIT 1").first();
     return json({ digest: empty ?? null, articles: [] });
@@ -353,26 +213,25 @@ async function handleGetLatestDigest(request, env) {
   const items = (await env.DB.prepare(`
     SELECT di.*, a.* FROM digest_items di
     JOIN articles a ON di.article_id = a.id
-    WHERE di.digest_id = ?
-    ORDER BY di.rank ASC
+    WHERE di.digest_id = ? ORDER BY di.rank ASC
   `).bind(digest.id).all()).results;
 
   return json({ digest, articles: items });
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SYNC 核心流程
+   SYNC CORE
    ═══════════════════════════════════════════════════════════════ */
 async function runSync(env) {
   const settings = await env.DB.prepare('SELECT * FROM settings WHERE id = 1').first();
   if (!settings || !settings.enabled) {
-    await logDigest(env, '', 0, 0, 'skipped', 'Disabled or no settings');
+    await logDigest(env, '', 0, 0, 'skipped', 'Disabled or no settings', '');
     return { status: 'skipped' };
   }
 
   const queryGroups = safeParse(settings.query_groups, []);
   if (!queryGroups.length) {
-    await logDigest(env, '', 0, 0, 'empty', 'No query groups');
+    await logDigest(env, '', 0, 0, 'empty', 'No query groups', '');
     return { status: 'empty' };
   }
 
@@ -381,35 +240,53 @@ async function runSync(env) {
   console.log(`Europe PMC returned ${candidates.length} candidates`);
 
   if (!candidates.length) {
-    await logDigest(env, searchQuery, 0, 0, 'empty', 'No candidates from Europe PMC');
-    return { status: 'empty' };
+    await logDigest(env, searchQuery, 0, 0, 'empty', 'No candidates from Europe PMC', '');
+    return { status: 'empty', message: 'Europe PMC returned no results. Try broadening search terms or increasing lookback days.' };
   }
 
-  // 去重
   const fresh = await deduplicateArticles(env, candidates);
   console.log(`${fresh.length} fresh after dedup`);
 
   if (!fresh.length) {
-    await logDigest(env, searchQuery, candidates.length, 0, 'empty', 'All duplicates');
-    return { status: 'empty' };
+    await logDigest(env, searchQuery, candidates.length, 0, 'empty', 'All duplicates', '');
+    return { status: 'empty', message: 'All candidates were already processed.' };
   }
 
-  // AI 评分
-  const scored = await scoreWithAI(env, fresh.slice(0, 20), settings.focus, settings.max_articles);
-  console.log(`AI selected ${scored.length} articles`);
+  // AI scoring (with concurrency control: process in batches of 10)
+  const toScore = fresh.slice(0, 20);
+  const batches = [];
+  for (let i = 0; i < toScore.length; i += 10) {
+    batches.push(toScore.slice(i, i + 10));
+  }
+
+  let scored = [];
+  let modelUsed = '';
+  for (const batch of batches) {
+    try {
+      const result = await scorePapers(env, batch, settings.focus, settings.max_articles);
+      scored = scored.concat(result.articles);
+      modelUsed = result.model;
+    } catch (e) {
+      console.error(`AI scoring batch error: ${e.message}`);
+      // Continue with what we have
+    }
+  }
 
   if (!scored.length) {
-    await logDigest(env, searchQuery, candidates.length, 0, 'empty', 'AI scored none');
-    return { status: 'empty' };
+    await logDigest(env, searchQuery, candidates.length, 0, 'empty', 'AI scoring failed for all batches', '');
+    return { status: 'error', message: friendlyError('AI analysis temporarily unavailable. Search results are preserved; please retry later.') };
   }
 
-  // 存储
-  const digestId = await storeResults(env, searchQuery, candidates.length, scored);
+  // Sort by total and trim
+  scored.sort((a, b) => b.total - a.total);
+  scored = scored.slice(0, settings.max_articles);
 
-  return { status: 'ok', digest_id: digestId, selected_count: scored.length };
+  const digestId = await storeResults(env, searchQuery, candidates.length, scored, modelUsed);
+
+  return { status: 'ok', digest_id: digestId, selected_count: scored.length, model: modelUsed };
 }
 
-/* ── 构造 Europe PMC 查询 ─────────────────────────────────── */
+/* ── Europe PMC query builder ─────────────────────────────── */
 function buildEuroPMCQuery(queryGroups, excludeTerms, excludeReviews) {
   const groups = queryGroups.map(g => {
     const terms = g.split('|').map(t => t.trim()).filter(Boolean);
@@ -418,58 +295,36 @@ function buildEuroPMCQuery(queryGroups, excludeTerms, excludeReviews) {
   }).filter(Boolean);
 
   let query = groups.join(' AND ');
+  if (!query) return '';
 
   if (excludeTerms) {
     const excludeList = excludeTerms.split('|').map(t => t.trim()).filter(Boolean);
-    for (const term of excludeList) {
-      query += ` NOT (${term})`;
-    }
+    for (const term of excludeList) query += ` NOT (${term})`;
   }
-
-  if (excludeReviews) {
-    query += ' NOT (REVIEW_TYPE:"Review")';
-  }
-
-  // 不强制限制 SRC:"MED" — MEDLINE 索引有几周延迟，会漏掉最新论文
-  // 如需限制，在排除词中加入
+  if (excludeReviews) query += ' NOT (REVIEW_TYPE:"Review")';
 
   return query;
 }
 
-/* ── 调 Europe PMC REST API ───────────────────────────────── */
+/* ── Europe PMC fetch ─────────────────────────────────────── */
 async function fetchEuropePMC(query, lookbackDays, pageSize) {
   const date = new Date();
   date.setDate(date.getDate() - lookbackDays);
   const fromDate = date.toISOString().slice(0, 10);
 
-  const params = new URLSearchParams({
-    query,
-    resultType: 'core',
-    pageSize: String(pageSize),
-    format: 'json',
-    sort: 'P_PDATE_D desc',
-    fromSearchDate: fromDate,
-  });
-
-  const url = `https://www.ebi.ac.uk/europepmc/webservices/rest/search?${params}`;
-  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  const params = new URLSearchParams({ query, resultType: 'core', pageSize: String(pageSize), format: 'json', sort: 'P_PDATE_D desc', fromSearchDate: fromDate });
+  const res = await fetch(`https://www.ebi.ac.uk/europepmc/webservices/rest/search?${params}`, { headers: { 'Accept': 'application/json' } });
   if (!res.ok) throw new Error(`Europe PMC HTTP ${res.status}`);
 
   const data = await res.json();
   return (data.resultList?.result ?? []).map(r => ({
-    id: `epmc_${r.source}_${r.id}`,
-    source: r.source,
-    external_id: r.id,
-    pmid: r.pmid || null,
-    pmcid: r.pmcid || null,
-    doi: r.doi || null,
-    title: r.title || 'Untitled',
-    authors: r.authorString || null,
+    id: `epmc_${r.source}_${r.id}`, source: r.source, external_id: r.id,
+    pmid: r.pmid || null, pmcid: r.pmcid || null, doi: r.doi || null,
+    title: r.title || 'Untitled', authors: r.authorString || null,
     journal: r.journalTitle || null,
     pub_date: (r.firstPublicationDate || r.pubYear) ?? null,
     abstract: r.abstractText || null,
-    article_url:
-      r.doi ? `https://doi.org/${r.doi}` :
+    article_url: r.doi ? `https://doi.org/${r.doi}` :
       r.pmcid ? `https://europepmc.org/article/PMC/${r.pmcid}` :
       r.pmid ? `https://pubmed.ncbi.nlm.nih.gov/${r.pmid}` :
       `https://europepmc.org/article/${r.source}/${r.id}`,
@@ -477,175 +332,79 @@ async function fetchEuropePMC(query, lookbackDays, pageSize) {
   }));
 }
 
-/* ── D1 去重 ──────────────────────────────────────────────── */
+/* ── Europe PMC by PMID ───────────────────────────────────── */
+async function fetchEuropePMCByPMIDs(pmids) {
+  const query = pmids.map(p => `EXT_ID:${p}`).join(' OR ');
+  const params = new URLSearchParams({ query, resultType: 'core', pageSize: String(pmids.length), format: 'json', sort: 'P_PDATE_D desc' });
+  const res = await fetch(`https://www.ebi.ac.uk/europepmc/webservices/rest/search?${params}`, { headers: { 'Accept': 'application/json' } });
+  if (!res.ok) throw new Error(`Europe PMC HTTP ${res.status}`);
+  const data = await res.json();
+  return (data.resultList?.result ?? []).map(r => ({
+    pmid: r.pmid || '', title: r.title || 'Untitled', abstract: r.abstractText || '',
+    journal: r.journalTitle || '', pub_date: r.firstPublicationDate || r.pubYear || '',
+  }));
+}
+
+/* ── Dedup ────────────────────────────────────────────────── */
 async function deduplicateArticles(env, candidates) {
   if (!candidates.length) return [];
   const ids = candidates.map(c => c.id);
   const placeholders = ids.map(() => '?').join(',');
-
-  const known = await env.DB.prepare(
-    `SELECT id FROM articles WHERE id IN (${placeholders})`
-  ).bind(...ids).all();
-
+  const known = await env.DB.prepare(`SELECT id FROM articles WHERE id IN (${placeholders})`).bind(...ids).all();
   const knownSet = new Set(known.results.map(r => r.id));
   return candidates.filter(c => !knownSet.has(c.id));
 }
 
-/* ── Workers AI 评分 ──────────────────────────────────────── */
-async function scoreWithAI(env, articles, focus, maxArticles) {
-  const model = env.AI_MODEL || '@cf/meta/llama-3.1-8b-instruct-fast';
-  const batch = articles.slice(0, 10);
-  const focusText = focus || '优先原创机制研究；关注遗传学证据和体内模型';
-
-  const articlesText = batch.map((a, i) =>
-    `${i}. ${a.title}\n   ${(a.abstract || '无摘要').slice(0, 800)}`
-  ).join('\n\n');
-
-  const systemPrompt = `你是肿瘤分子机制领域的资深研究者。根据研究者偏好，从候选论文中选出最值得关注的 ${maxArticles} 篇，对每篇输出以下 JSON：
-
-{
-  "articles": [
-    {
-      "index": 数字(候选论文编号),
-      "relevance": 1-10,
-      "novelty": 1-10,
-      "evidence": 1-10,
-      "surprise": 1-10,
-      "experiment_value": 1-10,
-      "evidence_level": "强/中/弱",
-      "why_interesting": "2-3句话",
-      "mechanism_chain": "1-2句话",
-      "key_evidence": "一句话",
-      "major_concern": "一句话",
-      "next_experiment": "一句话"
-    }
-  ]
-}
-
-研究者偏好：${focusText}
-
-只输出 JSON，不要任何额外文字。未入选的论文不要包含。按 (relevance+novelty+evidence+surprise+experiment_value) 总分从高到低排列，最多${maxArticles}篇。`;
-
-  const userMessage = `候选论文：\n\n${articlesText}`;
-
-  // 使用共享的 AI 响应解析函数 (定义在下方)
-
-  try {
-    const result = await env.AI.run(model, {
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage },
-      ],
-      max_tokens: 4096,
-    });
-
-    // 记录原始响应用于调试
-    const rawKeys = JSON.stringify(Object.keys(result || {}));
-    console.log(`AI result keys: ${rawKeys}`);
-
-    const text = extractTextAI(result);
-    if (!text) {
-      throw new Error(`Cannot extract text from AI response. Keys: ${rawKeys}`);
-    }
-
-    console.log(`AI text length: ${text.length}, first 200: ${text.slice(0, 200)}`);
-
-    const parsed = extractJSONAI(text);
-    if (!parsed) {
-      throw new Error(`Cannot parse JSON from AI text. Content: ${text.slice(0, 300)}`);
-    }
-
-    const items = Array.isArray(parsed) ? parsed : (parsed.articles ?? parsed.results ?? []);
-    if (!items.length) throw new Error('AI returned empty articles array');
-
-    return items.slice(0, maxArticles).map((item, idx) => {
-      const articleIdx = typeof item.index === 'number' ? item.index : idx;
-      const article = batch[articleIdx] ?? batch[idx];
-      const total = (item.relevance ?? 0) + (item.novelty ?? 0) + (item.evidence ?? 0) +
-                    (item.surprise ?? 0) + (item.experiment_value ?? 0);
-
-      return {
-        ...article,
-        rank: idx + 1,
-        relevance: item.relevance ?? 5,
-        novelty: item.novelty ?? 5,
-        evidence: item.evidence ?? 5,
-        surprise: item.surprise ?? 5,
-        experiment_value: item.experiment_value ?? 5,
-        total,
-        evidence_level: item.evidence_level ?? '中',
-        why_interesting: item.why_interesting ?? '',
-        mechanism_chain: item.mechanism_chain ?? '',
-        key_evidence: item.key_evidence ?? '',
-        major_concern: item.major_concern ?? '',
-        next_experiment: item.next_experiment ?? '',
-      };
-    });
-  } catch (e) {
-    console.error(`AI scoring error: ${e.message}`);
-    // 降级：AI 失败时直接返回前 N 篇
-    return articles.slice(0, maxArticles).map((a, i) => ({
-      ...a,
-      rank: i + 1,
-      relevance: 5, novelty: 5, evidence: 5, surprise: 5, experiment_value: 5, total: 25,
-      evidence_level: '中',
-      why_interesting: `AI 评分暂时不可用：${e.message}`,
-      mechanism_chain: '', key_evidence: '', major_concern: '', next_experiment: '',
-    }));
-  }
-}
-
-/* ── 存储结果 ─────────────────────────────────────────────── */
-async function storeResults(env, queryText, candidateCount, scored) {
-  // 先去重存 articles
+/* ── Store results ────────────────────────────────────────── */
+async function storeResults(env, queryText, candidateCount, scored, model) {
   for (const a of scored) {
     await env.DB.prepare(`
-      INSERT OR IGNORE INTO articles (id, source, external_id, pmid, pmcid, doi,
-        title, authors, journal, pub_date, abstract, article_url, inserted_at)
-      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
-    `).bind(a.id, a.source, a.external_id, a.pmid, a.pmcid, a.doi,
-            a.title, a.authors, a.journal, a.pub_date, a.abstract, a.article_url, a.inserted_at).run();
+      INSERT OR IGNORE INTO articles (id, source, external_id, pmid, pmcid, doi, title, authors, journal, pub_date, abstract, article_url, inserted_at)
+      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+    `).bind(a.id, a.source, a.external_id, a.pmid, a.pmcid, a.doi, a.title, a.authors, a.journal, a.pub_date, a.abstract, a.article_url, a.inserted_at).run();
   }
 
-  // 存 digest
+  const displayModel = MODEL_LABELS[model] || model || 'unknown';
   const digestResult = await env.DB.prepare(`
-    INSERT INTO digests (run_at, query_text, candidate_count, selected_count, status)
-    VALUES (datetime('now'), ?, ?, ?, 'ok')
-  `).bind(queryText, candidateCount, scored.length).run();
+    INSERT INTO digests (run_at, query_text, candidate_count, selected_count, status, model)
+    VALUES (datetime('now'), ?, ?, ?, 'ok', ?)
+  `).bind(queryText, candidateCount, scored.length, displayModel).run();
 
   const digestId = digestResult.meta?.last_row_id;
 
-  // 存 digest_items
   for (const a of scored) {
     await env.DB.prepare(`
-      INSERT INTO digest_items (digest_id, article_id, rank,
-        relevance, novelty, evidence, surprise, experiment_value, total,
-        evidence_level, why_interesting, mechanism_chain, key_evidence,
-        major_concern, next_experiment)
-      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
-    `).bind(digestId, a.id, a.rank,
-            a.relevance, a.novelty, a.evidence, a.surprise, a.experiment_value, a.total,
-            a.evidence_level, a.why_interesting, a.mechanism_chain, a.key_evidence,
-            a.major_concern, a.next_experiment).run();
+      INSERT INTO digest_items (digest_id, article_id, rank, relevance, novelty, evidence, surprise, experiment_value, total, evidence_level, why_interesting, mechanism_chain, key_evidence, major_concern, next_experiment)
+      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
+    `).bind(digestId, a.id, a.rank, a.relevance, a.novelty, a.evidence, a.surprise, a.experiment_value, a.total, a.evidence_level, a.why_interesting, a.mechanism_chain, a.key_evidence, a.major_concern, a.next_experiment).run();
   }
 
   return digestId;
 }
 
-/* ── 记录 digest 日志 ─────────────────────────────────────── */
-async function logDigest(env, queryText, candidateCount, selectedCount, status, error) {
+/* ── Log digest ───────────────────────────────────────────── */
+async function logDigest(env, queryText, candidateCount, selectedCount, status, error, model) {
   await env.DB.prepare(`
-    INSERT INTO digests (run_at, query_text, candidate_count, selected_count, status, error)
-    VALUES (datetime('now'), ?, ?, ?, ?, ?)
-  `).bind(queryText, candidateCount, selectedCount, status, error ?? null).run();
+    INSERT INTO digests (run_at, query_text, candidate_count, selected_count, status, error, model)
+    VALUES (datetime('now'), ?, ?, ?, ?, ?, ?)
+  `).bind(queryText, candidateCount, selectedCount, status, error ?? null, model ?? null).run();
 }
 
-/* ── 工具 ─────────────────────────────────────────────────── */
+/* ── Friendly error messages ──────────────────────────────── */
+function friendlyError(msg) {
+  if (msg.includes('quota') || msg.includes('rate') || msg.includes('429') || msg.includes('limit') || msg.includes('exceeded')) {
+    return 'Daily AI quota may be exhausted. Please retry after UTC 00:00 reset. PubMed results are preserved.';
+  }
+  if (msg.includes('All models failed')) {
+    return 'AI analysis temporarily unavailable. Search results are preserved; please retry later.';
+  }
+  return msg;
+}
+
+/* ── Utils ────────────────────────────────────────────────── */
 function safeParse(str, fallback) {
-  try { const v = JSON.parse(str); return Array.isArray(v) ? v : fallback; }
-  catch { return fallback; }
+  try { const v = JSON.parse(str); return Array.isArray(v) ? v : fallback; } catch { return fallback; }
 }
-
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, Number(v) || min));
 }

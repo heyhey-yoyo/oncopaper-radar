@@ -184,6 +184,7 @@ async function openDrawer() {
     drawer.classList.add('open');
   });
   await loadSettingsIntoForm();
+  loadModelInfo();
   updateAuthUI();
 }
 
@@ -229,10 +230,11 @@ function renderArticles(data) {
   $('#statusMeta').textContent = `From ${digest.candidate_count} candidates`;
   $('#statusDate').textContent = new Date(digest.run_at).toLocaleString('zh-CN');
 
+  const modelLabel = digest.model || 'GLM-4.7-Flash';
   $('#statusAiNote').innerHTML = `
     <span class="ai-badge">AI Scored</span>
-    <span><strong>Llama 3.1 8B</strong> (Cloudflare Workers AI) scored ${digest.candidate_count} candidates.
-    Analysis below is AI-generated from abstracts only; always verify against full text.</span>
+    <span>Model: <strong>${esc(modelLabel)}</strong> via Cloudflare Workers AI. Scored ${digest.candidate_count} candidates.
+    Analysis is AI-generated from abstracts only; always verify against full text.</span>
   `;
 
   $('#articlesList').innerHTML = articles.map(a => `
@@ -389,6 +391,14 @@ async function triggerSync() {
     btn.disabled = false;
     btn.innerHTML = orig;
   }
+}
+
+/* ── Model Info ────────────────────────────────────────────── */
+async function loadModelInfo() {
+  try {
+    const info = await fetch('/api/model-info').then(r => r.json());
+    $('#modelInfoText').textContent = `Primary: ${info.primary} | Fallback: ${info.fallback} | Provider: ${info.provider}`;
+  } catch { /* ignore */ }
 }
 
 /* ── AI Profile Generation ────────────────────────────────── */

@@ -19,8 +19,7 @@
   },
 
   "ai": {
-    "binding": "AI",
-    "remote": true
+    "binding": "AI"
   },
 
   "d1_databases": [
@@ -31,9 +30,8 @@
     }
   ],
 
-  "vars": {
-    "AI_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast"
-  },
+
+  "vars": {},
 
   "triggers": {
     "crons": ["0 5 * * *"]

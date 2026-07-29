@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS digests (
   candidate_count INTEGER NOT NULL DEFAULT 0,
   selected_count INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL CHECK (status IN ('ok', 'empty', 'error', 'skipped')),
-  error TEXT
+  error TEXT,
+  model TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_digests_run_at ON digests(run_at DESC);
@@ -81,3 +82,17 @@ CREATE TABLE IF NOT EXISTS digest_items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_digest_items_digest ON digest_items(digest_id, rank);
+
+-- Migration: add model column to existing digests table
+ALTER TABLE digests ADD COLUMN model TEXT NOT NULL DEFAULT '';
+
+-- Paper cache table (avoid redundant AI calls)
+CREATE TABLE IF NOT EXISTS paper_cache (
+  cache_key TEXT PRIMARY KEY,
+  pmid TEXT NOT NULL,
+  task TEXT NOT NULL,
+  model TEXT NOT NULL,
+  result TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_paper_cache_pmid ON paper_cache(pmid, task);
