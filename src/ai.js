@@ -64,7 +64,7 @@ function parseJSON(text) {
 export async function runAI(env, messages, options = {}) {
   const {
     temperature = 0.1,
-    maxCompletionTokens = 1000,
+    maxCompletionTokens = 3000,
     reasoningEffort = null,
   } = options;
 
@@ -73,10 +73,6 @@ export async function runAI(env, messages, options = {}) {
   for (const model of MODEL_CHAIN) {
     try {
       const params = { messages, temperature, max_completion_tokens: maxCompletionTokens };
-      // GLM reasoning model: use json_object to bypass reasoning and get direct JSON in content
-      if (model.includes('glm')) {
-        params.response_format = { type: 'json_object' };
-      }
       const result = await env.AI.run(model, params);
 
       const text = extractText(result);
@@ -109,22 +105,6 @@ export async function runAIForJSON(env, messages, options = {}) {
   return { parsed, model };
 }
 
-// ── Extract text from model response ────────────────────────
-// GLM-4.7-Flash uses reasoning_content; other models use content.
-// When max_tokens is sufficient, GLM puts final answer in content.
-function extractResult(result) {
-  const text = extractText(result);
-  // Try to extract just the final JSON — GLM may prepend reasoning
-  if (text) {
-    // If the text contains both reasoning and JSON, try to find the JSON portion
-    const jsonMatch = text.match(/\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}/);
-    if (jsonMatch) return jsonMatch[0];
-    // Fallback: return last 3000 chars (more likely to contain the answer)
-    if (text.length > 3000) return text.slice(-3000);
-  }
-  return text;
-}
-
 // ── Generate researcher profile from PMIDs ──────────────────
 export async function generateProfile(env, papers) {
   const papersText = papers.map((p, i) =>
@@ -149,7 +129,7 @@ export async function generateProfile(env, papers) {
 
 只输出 JSON，不要任何额外文字。不得虚构 PMID 中不存在的研究方向。保留英文专业术语。` },
     { role: 'user', content: `感兴趣的论文：\n\n${papersText}` },
-  ], { maxCompletionTokens: 2000 });
+  ], { maxCompletionTokens: 4000 });
 
   return {
     focus: parsed.researcherProfile || '',
@@ -195,7 +175,7 @@ export async function scorePapers(env, articles, focus, maxArticles) {
 
 只输出 JSON。未入选的论文不要包含。按总分从高到低排列，最多${maxArticles}篇。` },
     { role: 'user', content: `候选论文：\n\n${articlesText}` },
-  ], { temperature: 0, maxCompletionTokens: 220 * maxArticles + 1500 });
+  ], { temperature: 0, maxCompletionTokens: 400 * maxArticles + 2000 });
 
   const items = Array.isArray(parsed) ? parsed : (parsed.articles ?? parsed.results ?? []);
   if (!items.length) throw new Error('AI returned empty articles array');
