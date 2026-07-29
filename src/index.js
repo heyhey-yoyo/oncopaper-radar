@@ -186,7 +186,7 @@ async function handleDebugAI(env) {
   try {
     const result = await env.AI.run('@cf/zai-org/glm-4.7-flash', {
       messages: [{ role: 'system', content: 'Reply with JSON: {"status":"ok"}' }, { role: 'user', content: '{"status":"ok"}' }],
-      max_completion_tokens: 100,
+      max_completion_tokens: 500,
     });
     return json({ model: '@cf/zai-org/glm-4.7-flash', ai_ok: true, raw_type: typeof result, response: result });
   } catch (e) {

@@ -25,15 +25,19 @@ function extractText(result) {
   if (typeof result === 'string') return result;
   if (!result || typeof result !== 'object') return null;
 
-  const content = result.choices?.[0]?.message?.content;
-  if (typeof content === 'string' && content.length > 5) return content;
+  const choice = result.choices?.[0]?.message;
+  if (!choice) {
+    // nested: result.response.choices[0].message
+    const nested = result.response?.choices?.[0]?.message;
+    if (nested) {
+      return nested.reasoning_content || nested.reasoning || nested.content || null;
+    }
+    if (typeof result.response === 'string') return result.response;
+    return null;
+  }
 
-  if (typeof result.response === 'string' && result.response.length > 5) return result.response;
-
-  const nested = result.response?.choices?.[0]?.message?.content;
-  if (typeof nested === 'string' && nested.length > 5) return nested;
-
-  return null;
+  // GLM reasoning models put output in reasoning_content, content may be null
+  return choice.reasoning_content || choice.reasoning || choice.content || null;
 }
 
 // ── JSON extraction with markdown guard ─────────────────────
@@ -129,7 +133,7 @@ export async function generateProfile(env, papers) {
 
 只输出 JSON，不要任何额外文字。不得虚构 PMID 中不存在的研究方向。保留英文专业术语。` },
     { role: 'user', content: `感兴趣的论文：\n\n${papersText}` },
-  ], { maxCompletionTokens: 900 });
+  ], { maxCompletionTokens: 2000 });
 
   return {
     focus: parsed.researcherProfile || '',
@@ -175,7 +179,7 @@ export async function scorePapers(env, articles, focus, maxArticles) {
 
 只输出 JSON。未入选的论文不要包含。按总分从高到低排列，最多${maxArticles}篇。` },
     { role: 'user', content: `候选论文：\n\n${articlesText}` },
-  ], { temperature: 0, maxCompletionTokens: 220 * maxArticles + 500 });
+  ], { temperature: 0, maxCompletionTokens: 220 * maxArticles + 1500 });
 
   const items = Array.isArray(parsed) ? parsed : (parsed.articles ?? parsed.results ?? []);
   if (!items.length) throw new Error('AI returned empty articles array');
