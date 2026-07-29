@@ -66,7 +66,7 @@ function parseJSON(text) {
 export async function runAI(env, messages, options = {}) {
   const {
     temperature = 0.1,
-    maxCompletionTokens = 3000,
+    maxCompletionTokens = 4000,
     chain = MODEL_CHAIN,
   } = options;
 
@@ -128,7 +128,7 @@ export async function generateProfile(env, papers) {
     { role: 'user', content: `论文：\n\n${papersText}` },
   ];
 
-  const { parsed, model } = await runAIForJSON(env, messages, { maxCompletionTokens: 8000 });
+  const { parsed, model } = await runAIForJSON(env, messages, { maxCompletionTokens: 12000 });
 
   return {
     focus: parsed.researcherProfile || '',
@@ -174,7 +174,7 @@ export async function scorePapers(env, articles, focus, maxArticles) {
 
 只输出 JSON。未入选的论文不要包含。按总分从高到低排列，最多${maxArticles}篇。` },
     { role: 'user', content: `候选论文：\n\n${articlesText}` },
-  ], { temperature: 0, maxCompletionTokens: 400 * maxArticles + 2000 });
+  ], { temperature: 0, maxCompletionTokens: 1000 * maxArticles + 3000 });
 
   const items = Array.isArray(parsed) ? parsed : (parsed.articles ?? parsed.results ?? []);
   if (!items.length) throw new Error('AI returned empty articles array');
