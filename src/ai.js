@@ -8,8 +8,8 @@ const GLM    = '@cf/zai-org/glm-4.7-flash';
 const QWEN   = '@cf/qwen/qwen3-30b-a3b-fp8';
 const GRANITE = '@cf/ibm-granite/granite-4.0-h-micro';
 
-// Profile generation: Qwen first (no reasoning, faster, works)
-const PROFILE_CHAIN = [QWEN, GLM, GRANITE];
+// Profile generation: GLM first (deep reasoning for quality analysis)
+const PROFILE_CHAIN = [GLM, QWEN, GRANITE];
 // Scoring: GLM first (deep reasoning for nuanced paper evaluation)
 const SCORE_CHAIN   = [GLM, QWEN, GRANITE];
 // Default for other tasks
@@ -121,20 +121,31 @@ export async function generateProfile(env, papers) {
   ).join('\n\n');
 
   const messages = [
-    { role: 'system', content: `你是肿瘤分子机制领域的研究者。根据用户感兴趣的论文列表，直接输出 JSON（不要推理过程）：
+    { role: 'system', content: `你是肿瘤分子机制领域的资深研究者。分析用户提供的论文，深入理解其研究方向和偏好：
 
-{
-  "researcherProfile": "中文研究兴趣描述（150-300字）",
-  "concepts": [["同义词1 | 同义词2"], ["同义词3"]],
-  "excludeTerms": ["排除词1", "排除词2"],
-  "rationale": "简短生成依据"
-}
+1. researcherProfile: 详细总结研究兴趣（300-500字）：
+   - 核心生物学问题（疾病、通路、表型）
+   - 主要使用的方法学（体内模型、类器官、组学、生信等）
+   - 实验设计偏好（rescue实验、时间序列、剂量梯度等）
+   - 理论倾向（机制优先、转化导向、筛选发现等）
 
-外层数组为 AND，内层为 OR 同义词。不得虚构方向。` },
-    { role: 'user', content: `论文：\n\n${papersText}` },
+2. concepts: 提取核心检索概念，每行一个概念，同义词用 | 分隔
+   - 基因/蛋白: 如 KRAS G12D | KRASG12D | KRAS
+   - 疾病: 如 pancreatic cancer | PDAC | pancreatic ductal adenocarcinoma
+   - 通路/表型: 如 ferroptosis | lipid peroxidation | iron death
+   - 技术: 如 single-cell RNA-seq | scRNA-seq
+   每个概念尽量列出英文标准名 + 常见别名
+
+3. excludeTerms: 根据论文类型和方向，推测应排除的噪声词
+   - 例如如果关注原创机制研究，可排除: prognostic signature | nomogram | bioinformatics analysis | pan-cancer
+
+4. rationale: 用 3-5 句说明推断依据
+
+只输出 JSON，不要任何额外文字。` },
+    { role: 'user', content: `以下是我感兴趣的论文，请分析我的研究兴趣：\n\n${papersText}` },
   ];
 
-  const { parsed, model } = await runAIForJSON(env, messages, { chain: PROFILE_CHAIN, maxCompletionTokens: 8000 });
+  const { parsed, model } = await runAIForJSON(env, messages, { chain: PROFILE_CHAIN, maxCompletionTokens: 40000 });
 
   return {
     focus: parsed.researcherProfile || '',
