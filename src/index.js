@@ -389,36 +389,84 @@ async function deduplicateArticles(env, candidates) {
 /* ── Workers AI 评分 ──────────────────────────────────────── */
 async function scoreWithAI(env, articles, focus, maxArticles) {
   const model = env.AI_MODEL || '@cf/meta/llama-3.1-8b-instruct-fast';
-
-  // 分批：一次最多评 10 篇，取 top N 合并后再评
   const batch = articles.slice(0, 10);
-
   const focusText = focus || '优先原创机制研究；关注遗传学证据和体内模型';
 
   const articlesText = batch.map((a, i) =>
-    `[${i}] 标题: ${a.title}\n摘要: ${(a.abstract || '无摘要').slice(0, 1500)}`
+    `${i}. ${a.title}\n   ${(a.abstract || '无摘要').slice(0, 800)}`
   ).join('\n\n');
 
-  const systemPrompt = `你是肿瘤分子机制领域的资深研究员。根据以下研究者偏好，从候选论文中选出最值得关注的 ${maxArticles} 篇（最多不超过${maxArticles}篇），并给出结构化评分。
+  const systemPrompt = `你是肿瘤分子机制领域的资深研究者。根据研究者偏好，从候选论文中选出最值得关注的 ${maxArticles} 篇，对每篇输出以下 JSON：
+
+{
+  "articles": [
+    {
+      "index": 数字(候选论文编号),
+      "relevance": 1-10,
+      "novelty": 1-10,
+      "evidence": 1-10,
+      "surprise": 1-10,
+      "experiment_value": 1-10,
+      "evidence_level": "强/中/弱",
+      "why_interesting": "2-3句话",
+      "mechanism_chain": "1-2句话",
+      "key_evidence": "一句话",
+      "major_concern": "一句话",
+      "next_experiment": "一句话"
+    }
+  ]
+}
 
 研究者偏好：${focusText}
 
-对每篇入选论文，给出：
-- relevance (1-10): 与研究偏好的相关度
-- novelty (1-10): 新颖性
-- evidence (1-10): 证据强度（考虑模型、实验设计、样本量）
-- surprise (1-10): 反直觉程度
-- experiment_value (1-10): 对实验设计的启发价值
-- evidence_level: "强" / "中" / "弱"
-- why_interesting: 2-3句，为什么值得关注
-- mechanism_chain: 涉及的分子机制链（1-2句）
-- key_evidence: 最关键的一条证据
-- major_concern: 最主要的一个疑点或局限
-- next_experiment: 最直接的下一步验证实验
+只输出 JSON，不要任何额外文字。未入选的论文不要包含。按 (relevance+novelty+evidence+surprise+experiment_value) 总分从高到低排列，最多${maxArticles}篇。`;
 
-输出格式：{"articles": [...]}，articles 是一个数组。对于不入选的论文不要包含。按综合得分从高到低排列。`;
+  const userMessage = `候选论文：\n\n${articlesText}`;
 
-  const userMessage = `候选论文：\n\n${articlesText}\n\n请选出最多 ${maxArticles} 篇最值得关注的论文。输出格式：{"articles": [...]}`;
+  // 提取 AI 响应文本（兼容多种返回格式）
+  function extractText(result) {
+    // Workers AI 标准格式
+    const content = result?.response?.choices?.[0]?.message?.content;
+    if (content && typeof content === 'string' && content.length > 5) return content;
+
+    // 直接在 response 上的 text
+    if (typeof result?.response === 'string' && result.response.length > 5) return result.response;
+
+    // 旧格式 response.text
+    if (typeof result?.response?.text === 'string' && result.response.text.length > 5) return result.response.text;
+
+    // 整个 result 是字符串
+    if (typeof result === 'string' && result.length > 5) return result;
+
+    // 记录实际收到的结构用于调试
+    console.error('AI response structure:', JSON.stringify(Object.keys(result || {})));
+    console.error('AI response sample:', JSON.stringify(result).slice(0, 500));
+    return null;
+  }
+
+  // 从文本中提取 JSON
+  function extractJSON(text) {
+    // 直接解析
+    try { return JSON.parse(text); } catch {}
+
+    // 去掉 markdown 代码块
+    const cleaned = text.replace(/```(?:json)?\s*([\s\S]*?)```/g, '$1').trim();
+    try { return JSON.parse(cleaned); } catch {}
+
+    // 提取第一个 { 到最后一个 }
+    const objMatch = text.match(/\{[\s\S]*\}/);
+    if (objMatch) {
+      try { return JSON.parse(objMatch[0]); } catch {}
+    }
+
+    // 提取第一个 [ 到最后一个 ]
+    const arrMatch = text.match(/\[[\s\S]*\]/);
+    if (arrMatch) {
+      try { return JSON.parse(arrMatch[0]); } catch {}
+    }
+
+    return null;
+  }
 
   try {
     const result = await env.AI.run(model, {
@@ -426,33 +474,30 @@ async function scoreWithAI(env, articles, focus, maxArticles) {
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage },
       ],
-      response_format: { type: 'json_object' },
       max_tokens: 4096,
     });
 
-    // Workers AI 返回格式: { response: { choices: [{ message: { content: "..." } }] } }
-    const text = result?.response?.choices?.[0]?.message?.content
-      ?? (typeof result?.response === 'string' ? result.response : null)
-      ?? result?.response
-      ?? result;
-    if (!text || typeof text !== 'string') throw new Error('Empty AI response');
+    // 记录原始响应用于调试
+    const rawKeys = JSON.stringify(Object.keys(result || {}));
+    console.log(`AI result keys: ${rawKeys}`);
 
-    // 尝试解析 JSON
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      const match = text.match(/\[[\s\S]*\]/);
-      if (match) parsed = JSON.parse(match[0]);
-      else throw new Error('Cannot parse AI response');
+    const text = extractText(result);
+    if (!text) {
+      throw new Error(`Cannot extract text from AI response. Keys: ${rawKeys}`);
     }
 
-    // 统一成数组：支持 {"articles":[...]} 对象包裹和纯数组两种格式
-    const items = Array.isArray(parsed) ? parsed : (parsed.articles ?? parsed.results ?? []);
+    console.log(`AI text length: ${text.length}, first 200: ${text.slice(0, 200)}`);
 
-    // 映射回候选论文
+    const parsed = extractJSON(text);
+    if (!parsed) {
+      throw new Error(`Cannot parse JSON from AI text. Content: ${text.slice(0, 300)}`);
+    }
+
+    const items = Array.isArray(parsed) ? parsed : (parsed.articles ?? parsed.results ?? []);
+    if (!items.length) throw new Error('AI returned empty articles array');
+
     return items.slice(0, maxArticles).map((item, idx) => {
-      const articleIdx = item.index ?? item.idx ?? idx;
+      const articleIdx = typeof item.index === 'number' ? item.index : idx;
       const article = batch[articleIdx] ?? batch[idx];
       const total = (item.relevance ?? 0) + (item.novelty ?? 0) + (item.evidence ?? 0) +
                     (item.surprise ?? 0) + (item.experiment_value ?? 0);
@@ -476,7 +521,7 @@ async function scoreWithAI(env, articles, focus, maxArticles) {
     });
   } catch (e) {
     console.error(`AI scoring error: ${e.message}`);
-    // 降级：AI 失败时直接返回前 N 篇，默认评分
+    // 降级：AI 失败时直接返回前 N 篇
     return articles.slice(0, maxArticles).map((a, i) => ({
       ...a,
       rank: i + 1,
