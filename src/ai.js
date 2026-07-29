@@ -202,7 +202,7 @@ export async function scorePapers(env, articles, focus, maxArticles) {
 
 只输出 JSON。未入选的论文不要包含。按总分从高到低排列，最多${maxArticles}篇。` },
     { role: 'user', content: `候选论文：\n\n${articlesText}` },
-  ], { chain: SCORE_CHAIN, temperature: 0, maxCompletionTokens: 2000 * maxArticles + 4000 });
+  ], { chain: SCORE_CHAIN, temperature: 0, maxCompletionTokens: 800 * maxArticles + 1000 });
 
   const items = Array.isArray(parsed) ? parsed : (parsed.articles ?? parsed.results ?? []);
   if (!items.length) throw new Error('AI returned empty articles array');
