@@ -4,21 +4,24 @@
    ============================================================ */
 
 // ── Model chain ────────────────────────────────────────────
-// Qwen first (no reasoning overhead, cheaper), GLM as primary fallback, Granite last
-const PRIMARY_MODEL   = '@cf/qwen/qwen3-30b-a3b-fp8';
-const FALLBACK_MODEL  = '@cf/zai-org/glm-4.7-flash';
-const CHEAP_FALLBACK  = '@cf/ibm-granite/granite-4.0-h-micro';
+// Scoring benefits from GLM's reasoning; profile generation prefers Qwen's speed
+const GLM    = '@cf/zai-org/glm-4.7-flash';
+const QWEN   = '@cf/qwen/qwen3-30b-a3b-fp8';
+const GRANITE = '@cf/ibm-granite/granite-4.0-h-micro';
 
-const MODEL_CHAIN = [PRIMARY_MODEL, FALLBACK_MODEL, CHEAP_FALLBACK];
+// Scoring: GLM first (reasoning helps nuanced evaluation)
+const SCORE_CHAIN = [GLM, QWEN, GRANITE];
+// Profile/profile generation: Qwen first (no reasoning overhead, faster)
+const PROFILE_CHAIN = [QWEN, GLM, GRANITE];
 
 // ── Prompt version (bump to invalidate caches) ──────────────
 export const PROMPT_VERSION = '2026-07-29-v1';
 
 // ── Model display names ─────────────────────────────────────
 export const MODEL_LABELS = {
-  '@cf/qwen/qwen3-30b-a3b-fp8':          'Qwen3-30B-A3B',
-  '@cf/zai-org/glm-4.7-flash':           'GLM-4.7-Flash',
-  '@cf/ibm-granite/granite-4.0-h-micro': 'Granite 4.0 H Micro',
+  [GLM]:     'GLM-4.7-Flash',
+  [QWEN]:    'Qwen3-30B-A3B',
+  [GRANITE]: 'Granite 4.0 H Micro',
 };
 
 // ── Extract text from Workers AI response ──────────────────
@@ -66,12 +69,12 @@ export async function runAI(env, messages, options = {}) {
   const {
     temperature = 0.1,
     maxCompletionTokens = 3000,
-    reasoningEffort = null,
+    chain = SCORE_CHAIN,  // default to scoring chain (GLM first)
   } = options;
 
   let lastError = null;
 
-  for (const model of MODEL_CHAIN) {
+  for (const model of chain) {
     try {
       const params = { messages, temperature, max_completion_tokens: maxCompletionTokens };
       const result = await env.AI.run(model, params);
@@ -95,6 +98,7 @@ export async function runAI(env, messages, options = {}) {
 export async function runAIForJSON(env, messages, options = {}) {
   const { text, model } = await runAI(env, messages, {
     ...options,
+    chain: options.chain ?? SCORE_CHAIN,
     temperature: options.temperature ?? 0.1,
   });
 
@@ -126,7 +130,7 @@ export async function generateProfile(env, papers) {
     { role: 'user', content: `论文：\n\n${papersText}` },
   ];
 
-  const { parsed, model } = await runAIForJSON(env, messages, { maxCompletionTokens: 4000 });
+  const { parsed, model } = await runAIForJSON(env, messages, { chain: PROFILE_CHAIN, maxCompletionTokens: 4000 });
 
   return {
     focus: parsed.researcherProfile || '',
