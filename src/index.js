@@ -163,7 +163,7 @@ async function handleDebugSync(env) {
     resultType: 'core',
     pageSize: '50',
     format: 'json',
-    sort: 'FIRST_PUBLICATION_DATE desc',
+    sort: 'P_PDATE_D desc',
     fromSearchDate: fromDate,
   });
 
@@ -311,7 +311,7 @@ async function fetchEuropePMC(query, lookbackDays, pageSize) {
     resultType: 'core',
     pageSize: String(pageSize),
     format: 'json',
-    sort: 'FIRST_PUBLICATION_DATE desc',
+    sort: 'P_PDATE_D desc',
     fromSearchDate: fromDate,
   });
 
