@@ -8,8 +8,8 @@ const GLM    = '@cf/zai-org/glm-4.7-flash';
 const QWEN   = '@cf/qwen/qwen3-30b-a3b-fp8';
 const GRANITE = '@cf/ibm-granite/granite-4.0-h-micro';
 
-// Profile generation: GLM first (deep reasoning for quality analysis)
-const PROFILE_CHAIN = [GLM, QWEN, GRANITE];
+// Profile: Qwen first (GLM times out on free tier), GLM as quality fallback
+const PROFILE_CHAIN = [QWEN, GLM, GRANITE];
 // Scoring: GLM first (deep reasoning for nuanced paper evaluation)
 const SCORE_CHAIN   = [GLM, QWEN, GRANITE];
 // Default for other tasks
@@ -156,7 +156,7 @@ export async function generateProfile(env, papers) {
     { role: 'user', content: `以下是我感兴趣的论文，请分析我的研究兴趣：\n\n${papersText}` },
   ];
 
-  const { parsed, model } = await runAIForJSON(env, messages, { chain: PROFILE_CHAIN, maxCompletionTokens: 12000 });
+  const { parsed, model } = await runAIForJSON(env, messages, { chain: PROFILE_CHAIN, maxCompletionTokens: 6000 });
 
   return {
     focus: parsed.researcherProfile || '',
