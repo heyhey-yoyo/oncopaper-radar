@@ -148,6 +148,7 @@ p { margin: 0; }
   align-items: center;
   justify-content: center;
 }
+.modal[hidden] { display: none; }
 .modal-card {
   background: var(--surface);
   border: 1px solid var(--line);

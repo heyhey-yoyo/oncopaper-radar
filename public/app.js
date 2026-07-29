@@ -78,7 +78,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 抽屉
   $('#closeDrawerBtn').addEventListener('click', closeDrawer);
-  overlay.addEventListener('click', closeDrawer);
+  overlay.addEventListener('click', () => {
+    if (!drawer.hidden) closeDrawer();
+    if (!$('#loginModal').hidden) closeLogin();
+  });
   $('#saveConfigBtn').addEventListener('click', saveConfig);
   $('#syncBtn').addEventListener('click', triggerSync);
   $('#emptySettingsBtn').addEventListener('click', openDrawer);
@@ -124,13 +127,17 @@ async function verifyToken() {
 
 function openLogin() {
   $('#loginModal').hidden = false;
+  overlay.hidden = false;
+  overlay.classList.add('show');
   $('#loginTokenInput').value = '';
   $('#loginMsg').hidden = true;
-  $('#loginTokenInput').focus();
+  setTimeout(() => $('#loginTokenInput').focus(), 100);
 }
 
 function closeLogin() {
   $('#loginModal').hidden = true;
+  overlay.classList.remove('show');
+  setTimeout(() => { overlay.hidden = true; }, 250);
 }
 
 async function doLogin() {
