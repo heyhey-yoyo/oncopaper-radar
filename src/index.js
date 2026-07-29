@@ -416,9 +416,9 @@ async function scoreWithAI(env, articles, focus, maxArticles) {
 - major_concern: 最主要的一个疑点或局限
 - next_experiment: 最直接的下一步验证实验
 
-只输出 JSON 数组。对于不入选的论文不要输出。按综合得分从高到低排列。`;
+输出格式：{"articles": [...]}，articles 是一个数组。对于不入选的论文不要包含。按综合得分从高到低排列。`;
 
-  const userMessage = `候选论文：\n\n${articlesText}\n\n请选出最多 ${maxArticles} 篇最值得关注的论文，只输出 JSON 数组。`;
+  const userMessage = `候选论文：\n\n${articlesText}\n\n请选出最多 ${maxArticles} 篇最值得关注的论文。输出格式：{"articles": [...]}`;
 
   try {
     const result = await env.AI.run(model, {
@@ -447,8 +447,8 @@ async function scoreWithAI(env, articles, focus, maxArticles) {
       else throw new Error('Cannot parse AI response');
     }
 
-    // 统一成数组
-    const items = Array.isArray(parsed) ? parsed : (parsed.articles ?? parsed.results ?? [parsed]);
+    // 统一成数组：支持 {"articles":[...]} 对象包裹和纯数组两种格式
+    const items = Array.isArray(parsed) ? parsed : (parsed.articles ?? parsed.results ?? []);
 
     // 映射回候选论文
     return items.slice(0, maxArticles).map((item, idx) => {
