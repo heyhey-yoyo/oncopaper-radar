@@ -30,6 +30,13 @@
     }
   ],
 
+  "workflows": [
+    {
+      "name": "oncopaper-radar-jobs",
+      "binding": "RADAR_WORKFLOW",
+      "class_name": "RadarWorkflow"
+    }
+  ],
 
   "vars": {},
 

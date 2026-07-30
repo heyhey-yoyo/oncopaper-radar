@@ -1,274 +1,552 @@
 /* ============================================================
-   OncoPaper Radar — Unified AI Service
-   Model chain, JSON parsing, fallback, caching
+   OncoPaper Radar — bounded Workers AI service
+   Small outputs, two-model fallback, strict validation, and
+   deterministic fallbacks so a failed inference never loses a run.
    ============================================================ */
 
-// ── Model chains ───────────────────────────────────────────
-const GLM    = '@cf/zai-org/glm-4.7-flash';
-const QWEN   = '@cf/qwen/qwen3-30b-a3b-fp8';
+const QWEN = '@cf/qwen/qwen3-30b-a3b-fp8';
 const GRANITE = '@cf/ibm-granite/granite-4.0-h-micro';
 
-// Profile: Qwen first (GLM times out on free tier), GLM as quality fallback
-const PROFILE_CHAIN = [QWEN, GLM, GRANITE];
-// Scoring: GLM first (deep reasoning for nuanced paper evaluation)
-const SCORE_CHAIN   = [GLM, QWEN, GRANITE];
-// Default for other tasks
-const MODEL_CHAIN   = [QWEN, GLM, GRANITE];
+const PROFILE_CHAIN = [QWEN, GRANITE];
+const SCORE_CHAIN = [QWEN, GRANITE];
 
-// ── Prompt version (bump to invalidate caches) ──────────────
-export const PROMPT_VERSION = '2026-07-29-v1';
-
-// ── Model display names ─────────────────────────────────────
+export const PROMPT_VERSION = '2026-07-30-v3';
 export const MODEL_LABELS = {
-  [GLM]:     'GLM-4.7-Flash',
-  [QWEN]:    'Qwen3-30B-A3B',
+  [QWEN]: 'Qwen3-30B-A3B',
   [GRANITE]: 'Granite 4.0 H Micro',
+  heuristic: 'Heuristic fallback',
 };
 
-// ── Extract text from Workers AI response ──────────────────
-function extractTexts(result) {
-  // Returns { primary, fallback } — primary is content (most models put answer here)
-  // fallback is reasoning_content (GLM may put answer here if content is reasoning)
-  if (typeof result === 'string') return { primary: result };
-  if (!result || typeof result !== 'object') return {};
+function extractText(result) {
+  if (typeof result === 'string') return result;
+  if (!result || typeof result !== 'object') return '';
+  if (typeof result.response === 'string') return result.response;
 
-  const msg = result.choices?.[0]?.message
-           || result.response?.choices?.[0]?.message;
-  if (!msg) {
-    if (typeof result.response === 'string') return { primary: result.response };
-    return {};
+  const message = result.choices?.[0]?.message
+    ?? result.response?.choices?.[0]?.message;
+
+  if (typeof message?.content === 'string' && message.content.trim()) {
+    return message.content;
   }
-
-  return {
-    primary: typeof msg.content === 'string' ? msg.content : null,
-    fallback: typeof msg.reasoning_content === 'string' ? msg.reasoning_content
-           : typeof msg.reasoning === 'string' ? msg.reasoning : null,
-  };
+  if (typeof message?.reasoning_content === 'string') {
+    return message.reasoning_content;
+  }
+  if (typeof message?.reasoning === 'string') return message.reasoning;
+  return '';
 }
 
-// ── JSON extraction with markdown guard ─────────────────────
 function parseJSON(text) {
-  // Direct parse
-  try { return JSON.parse(text); } catch {/* */}
-
-  // Strip ```json ... ``` fences
-  const cleaned = text.replace(/```(?:json)?\s*([\s\S]*?)```/g, '$1').trim();
-  try { return JSON.parse(cleaned); } catch {/* */}
-
-  // Extract first {...}
-  const objMatch = text.match(/\{[\s\S]*\}/);
-  if (objMatch) { try { return JSON.parse(objMatch[0]); } catch {/* */} }
-
-  // Extract first [...]
-  const arrMatch = text.match(/\[[\s\S]*\]/);
-  if (arrMatch) { try { return JSON.parse(arrMatch[0]); } catch {/* */} }
-
-  return null;
-}
-
-// ── Unified AI call with fallback chain ────────────────────
-export async function runAI(env, messages, options = {}) {
-  const {
-    temperature = 0.1,
-    maxCompletionTokens = 8000,
-    chain = MODEL_CHAIN,
-  } = options;
-
-  let lastError = null;
-
-  for (const model of chain) {
-    try {
-      const params = { messages, temperature, max_completion_tokens: maxCompletionTokens, reasoning_effort: 'low' };
-      console.log(`[AI] trying ${model}, tokens=${maxCompletionTokens}`);
-      const result = await env.AI.run(model, params);
-
-      const texts = extractTexts(result);
-      const primary = texts.primary?.trim();
-      const fallback = texts.fallback?.trim();
-      console.log(`[AI] ${model} primary=${primary?.length || 0} fallback=${fallback?.length || 0}`);
-
-      if ((!primary || primary.length < 3) && (!fallback || fallback.length < 3)) {
-        const keys = Object.keys(result || {});
-        throw new Error(`Empty response from ${model}. Keys: ${keys.join(',')}`);
-      }
-
-      return { text: primary || '', fallbackText: fallback || '', model };
-    } catch (err) {
-      lastError = err;
-      console.error(`[AI] ${model} FAILED: ${err.message}`);
-    }
-  }
-
-  throw new Error(`All models failed. Last error: ${lastError?.message}`);
-}
-
-// ── Run and parse JSON ─────────────────────────────────────
-export async function runAIForJSON(env, messages, options = {}) {
-  const { text, fallbackText, model } = await runAI(env, messages, {
-    ...options,
-    chain: options.chain ?? MODEL_CHAIN,
-    temperature: options.temperature ?? 0.1,
-  });
-
-  // Try primary text first (content field), then fallback (reasoning_content)
-  let parsed = parseJSON(text);
-  let source = 'content';
-  if (!parsed && fallbackText) {
-    parsed = parseJSON(fallbackText);
-    source = 'reasoning_content';
-  }
-  if (!parsed) {
-    throw new Error(`Cannot parse JSON from ${model}. Content: ${text.slice(0, 150)}... Fallback: ${(fallbackText||'').slice(0, 150)}`);
-  }
-  console.log(`[AI] JSON parsed from ${source}, fields: ${Object.keys(parsed).join(',')}`);
-
-  return { parsed, model };
-}
-
-// ── Generate researcher profile from PMIDs ──────────────────
-export async function generateProfile(env, papers) {
-  const papersText = papers.map((p, i) =>
-    `${i + 1}. [PMID: ${p.pmid}] ${p.title}\n   ${(p.abstract || '').slice(0, 800)}`
-  ).join('\n\n');
-
-  const messages = [
-    { role: 'system', content: `你是肿瘤分子机制领域的资深研究者。分析用户提供的论文，深入理解其研究方向和偏好：
-
-1. researcherProfile: 详细总结研究兴趣（300-500字）：
-   - 核心生物学问题（疾病、通路、表型）
-   - 主要使用的方法学（体内模型、类器官、组学、生信等）
-   - 实验设计偏好（rescue实验、时间序列、剂量梯度等）
-   - 理论倾向（机制优先、转化导向、筛选发现等）
-
-2. concepts: 提取核心检索概念，每行一个概念，同义词用 | 分隔
-   - 基因/蛋白: 如 KRAS G12D | KRASG12D | KRAS
-   - 疾病: 如 pancreatic cancer | PDAC | pancreatic ductal adenocarcinoma
-   - 通路/表型: 如 ferroptosis | lipid peroxidation | iron death
-   - 技术: 如 single-cell RNA-seq | scRNA-seq
-   每个概念尽量列出英文标准名 + 常见别名
-
-3. excludeTerms: 根据论文类型和方向，推测应排除的噪声词
-   - 例如如果关注原创机制研究，可排除: prognostic signature | nomogram | bioinformatics analysis | pan-cancer
-
-4. rationale: 用 3-5 句说明推断依据
-
-只输出 JSON，不要任何额外文字。` },
-    { role: 'user', content: `以下是我感兴趣的论文，请分析我的研究兴趣：\n\n${papersText}` },
+  if (!text) return null;
+  const attempts = [
+    text.trim(),
+    text.replace(/```(?:json)?\s*([\s\S]*?)```/gi, '$1').trim(),
   ];
 
-  const { parsed, model } = await runAIForJSON(env, messages, { chain: PROFILE_CHAIN, maxCompletionTokens: 6000 });
+  for (const candidate of attempts) {
+    try { return JSON.parse(candidate); } catch { /* continue */ }
+  }
 
-  return {
-    focus: parsed.researcherProfile || '',
-    query_groups: (parsed.concepts || []).map(c => Array.isArray(c) ? c.join(' | ') : c),
-    exclude_terms: (parsed.excludeTerms || []).join(' | '),
-    model,
-  };
-}
-
-// ── Score a batch of papers ─────────────────────────────────
-export async function scorePapers(env, articles, focus, maxArticles) {
-  const batch = articles.slice(0, 10);
-  const focusText = focus || 'Prioritize mechanistic studies with genetic evidence, rescue experiments, and in vivo validation.';
-
-  const articlesText = batch.map((a, i) =>
-    `${i}. [PMID: ${a.pmid || 'N/A'}] ${a.title}\n   ${(a.abstract || 'No abstract').slice(0, 800)}`
-  ).join('\n\n');
-
-  const { parsed, model } = await runAIForJSON(env, [
-    { role: 'system', content: `你是肿瘤分子机制领域的资深研究者。从候选论文中选出最值得关注的 ${maxArticles} 篇。
-
-研究者偏好：${focusText}
-
-输出 JSON：
-{
-  "articles": [
-    {
-      "index": 候选编号,
-      "relevance": 1-10,
-      "novelty": 1-10,
-      "evidence": 1-10,
-      "surprise": 1-10,
-      "experiment_value": 1-10,
-      "evidence_level": "强/中/弱",
-      "why_interesting": "2-3句话",
-      "mechanism_chain": "1-2句话",
-      "key_evidence": "一句话",
-      "major_concern": "一句话",
-      "next_experiment": "一句话"
-    }
-  ]
-}
-
-只输出 JSON。未入选的论文不要包含。按总分从高到低排列，最多${maxArticles}篇。` },
-    { role: 'user', content: `候选论文：\n\n${articlesText}` },
-  ], { chain: SCORE_CHAIN, temperature: 0, maxCompletionTokens: 800 * maxArticles + 1000 });
-
-  const items = Array.isArray(parsed) ? parsed : (parsed.articles ?? parsed.results ?? []);
-  if (!items.length) throw new Error('AI returned empty articles array');
-
-  return {
-    articles: items.slice(0, maxArticles).map((item, idx) => {
-      const articleIdx = typeof item.index === 'number' ? item.index : idx;
-      const article = batch[articleIdx] ?? batch[idx];
-      const total = (item.relevance ?? 0) + (item.novelty ?? 0) + (item.evidence ?? 0) +
-                    (item.surprise ?? 0) + (item.experiment_value ?? 0);
-      return {
-        ...article,
-        rank: idx + 1,
-        relevance: item.relevance ?? 5,
-        novelty: item.novelty ?? 5,
-        evidence: item.evidence ?? 5,
-        surprise: item.surprise ?? 5,
-        experiment_value: item.experiment_value ?? 5,
-        total,
-        evidence_level: item.evidence_level ?? '中',
-        why_interesting: item.why_interesting ?? '',
-        mechanism_chain: item.mechanism_chain ?? '',
-        key_evidence: item.key_evidence ?? '',
-        major_concern: item.major_concern ?? '',
-        next_experiment: item.next_experiment ?? '',
-      };
-    }),
-    model,
-  };
-}
-
-// ── PMID-based paper cache ──────────────────────────────────
-export function cacheKey(pmid, task) {
-  return `ai-cache:${PROMPT_VERSION}:${task}:${pmid}`;
-}
-
-export async function getCached(env, pmid, task) {
-  try {
-    const row = await env.DB.prepare(
-      'SELECT result, model, created_at FROM paper_cache WHERE cache_key = ?'
-    ).bind(cacheKey(pmid, task)).first();
-    if (row) return JSON.parse(row.result);
-  } catch {/* table may not exist */}
+  const objectMatch = text.match(/\{[\s\S]*\}/);
+  if (objectMatch) {
+    try { return JSON.parse(objectMatch[0]); } catch { /* continue */ }
+  }
+  const arrayMatch = text.match(/\[[\s\S]*\]/);
+  if (arrayMatch) {
+    try { return JSON.parse(arrayMatch[0]); } catch { /* continue */ }
+  }
   return null;
 }
 
-export async function setCache(env, pmid, task, result, model) {
-  try {
-    await env.DB.prepare(`
-      INSERT OR REPLACE INTO paper_cache (cache_key, pmid, task, model, result, created_at)
-      VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
-    `).bind(cacheKey(pmid, task), pmid, task, model, JSON.stringify(result)).run();
-  } catch {/* table may not exist */}
+function buildParams(messages, maxTokens) {
+  return {
+    messages,
+    temperature: 0,
+    max_tokens: maxTokens,
+    response_format: { type: 'json_object' },
+  };
 }
 
-// ── Concurrency limiter ─────────────────────────────────────
-export async function asyncPool(limit, items, fn) {
-  const results = [];
-  const executing = new Set();
-  for (const [i, item] of items.entries()) {
-    const p = Promise.resolve().then(() => fn(item, i));
-    results.push(p);
-    executing.add(p);
-    const clean = () => executing.delete(p);
-    p.then(clean, clean);
-    if (executing.size >= limit) await Promise.race(executing);
+function timeoutError(label, milliseconds) {
+  const error = new Error(`${label} exceeded ${Math.round(milliseconds / 1000)} seconds`);
+  error.name = 'AIModelTimeout';
+  return error;
+}
+
+async function withTimeout(promise, milliseconds, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(timeoutError(label, milliseconds)), milliseconds);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
-  return Promise.all(results);
+}
+
+export async function runAIForJSON(env, messages, options = {}) {
+  const chain = options.chain ?? SCORE_CHAIN;
+  const maxTokens = clampInt(options.maxTokens ?? 900, 128, 1800);
+  const modelTimeoutMs = clampInt(options.modelTimeoutMs ?? 60_000, 10_000, 120_000);
+  const totalTimeoutMs = clampInt(options.totalTimeoutMs ?? 90_000, 15_000, 150_000);
+  const deadline = Date.now() + totalTimeoutMs;
+  const errors = [];
+
+  for (const model of chain.slice(0, 2)) {
+    const remaining = deadline - Date.now();
+    if (remaining < 5_000) break;
+    const attemptTimeout = Math.min(modelTimeoutMs, remaining);
+    try {
+      console.log(`[AI] ${options.label || 'json'}: ${model}, max_tokens=${maxTokens}`);
+      const result = await withTimeout(
+        env.AI.run(model, buildParams(messages, maxTokens)),
+        attemptTimeout,
+        MODEL_LABELS[model] || model,
+      );
+      const text = extractText(result).trim();
+      const parsed = parseJSON(text);
+      if (!parsed) throw new Error(`Invalid JSON; response prefix: ${text.slice(0, 120)}`);
+      return { parsed, model };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(`${MODEL_LABELS[model] || model}: ${message}`);
+      console.error(`[AI] ${model} failed: ${message}`);
+      // A timed-out binding call may still be winding down. Do not start a
+      // second expensive model concurrently; let the deterministic fallback run.
+      if (error?.name === 'AIModelTimeout') break;
+    }
+  }
+
+  throw new Error(`All bounded AI attempts failed: ${errors.join(' | ')}`);
+}
+
+function cleanText(value, maxLength = 1000) {
+  return String(value ?? '')
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+}
+
+function cleanTerm(value) {
+  return cleanText(value, 100)
+    .replace(/["'`\\()[\]{}:^~*?]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeConcept(raw) {
+  const terms = Array.isArray(raw)
+    ? raw
+    : Array.isArray(raw?.terms)
+      ? raw.terms
+      : typeof raw === 'string'
+        ? raw.split('|')
+        : [];
+
+  const seen = new Set();
+  const output = [];
+  for (const value of terms) {
+    const term = cleanTerm(value);
+    const key = term.toLowerCase();
+    if (!term || seen.has(key)) continue;
+    seen.add(key);
+    output.push(term);
+    if (output.length >= 4) break;
+  }
+  return output;
+}
+
+function normalizeProfile(parsed) {
+  const mustRaw = parsed.mustConcepts ?? parsed.must ?? [];
+  const shouldRaw = parsed.shouldConcepts ?? parsed.should ?? [];
+  let must = (Array.isArray(mustRaw) ? mustRaw : []).map(normalizeConcept).filter(Boolean);
+  let should = (Array.isArray(shouldRaw) ? shouldRaw : []).map(normalizeConcept).filter(Boolean);
+
+  // Compatibility with older model output while still enforcing tight limits.
+  if (!must.length && Array.isArray(parsed.concepts)) {
+    const concepts = parsed.concepts.map(normalizeConcept).filter(group => group.length);
+    must = concepts.slice(0, 2);
+    should = concepts.slice(2, 4);
+  }
+
+  must = must.filter(group => group.length).slice(0, 2);
+  should = should.filter(group => group.length).slice(0, 2);
+
+  let termBudget = 16;
+  const trimToBudget = groups => groups.map(group => {
+    const trimmed = group.slice(0, Math.max(0, termBudget));
+    termBudget -= trimmed.length;
+    return trimmed;
+  }).filter(group => group.length);
+
+  must = trimToBudget(must);
+  should = trimToBudget(should);
+
+  const exclusions = Array.isArray(parsed.excludeTerms)
+    ? parsed.excludeTerms
+    : Array.isArray(parsed.exclude)
+      ? parsed.exclude
+      : typeof parsed.excludeTerms === 'string'
+        ? parsed.excludeTerms.split('|')
+        : [];
+
+  const excludeTerms = [];
+  const seenExcludes = new Set();
+  for (const item of exclusions) {
+    const term = cleanTerm(item);
+    const key = term.toLowerCase();
+    if (!term || seenExcludes.has(key)) continue;
+    seenExcludes.add(key);
+    excludeTerms.push(term);
+    if (excludeTerms.length >= 3) break;
+  }
+
+  if (!must.length) throw new Error('Profile did not contain a usable must concept');
+
+  return {
+    focus: cleanText(parsed.researcherProfile ?? parsed.profile ?? parsed.focus, 3500),
+    must,
+    should,
+    excludeTerms,
+    rationale: cleanText(parsed.rationale, 800),
+  };
+}
+
+function mostFrequentMatches(text, pattern, limit) {
+  const counts = new Map();
+  for (const match of text.matchAll(pattern)) {
+    const term = cleanTerm(match[0]);
+    if (!term) continue;
+    const key = term.toLowerCase();
+    counts.set(key, { term, count: (counts.get(key)?.count ?? 0) + 1 });
+  }
+  return [...counts.values()]
+    .sort((a, b) => b.count - a.count || a.term.length - b.term.length)
+    .slice(0, limit)
+    .map(item => item.term);
+}
+
+function normalizeDiseasePhrase(value) {
+  let words = cleanTerm(value).split(/\s+/).filter(Boolean);
+  const separators = new Set(['in', 'of', 'for', 'with', 'via', 'through', 'and']);
+  for (let index = words.length - 2; index >= 0; index -= 1) {
+    if (separators.has(words[index].toLowerCase())) {
+      words = words.slice(index + 1);
+      break;
+    }
+  }
+  const generic = new Set(['signaling', 'mechanism', 'mechanisms', 'role', 'roles', 'analysis', 'study', 'studies']);
+  while (words.length > 2 && generic.has(words[0].toLowerCase())) words.shift();
+  return words.slice(-5).join(' ');
+}
+
+function fallbackProfile(papers, cause) {
+  const titles = papers.map(paper => cleanText(paper.title, 400)).filter(Boolean);
+  const titleText = titles.join(' ');
+  const diseases = [...new Set(mostFrequentMatches(
+    titleText,
+    /\b(?:[A-Za-z][A-Za-z-]*\s+){0,5}(?:cancer|carcinoma|adenocarcinoma|leukemia|lymphoma|melanoma|sarcoma|glioma|glioblastoma|myeloma|neoplasm|tumou?r)s?\b/gi,
+    8,
+  ).map(normalizeDiseasePhrase).filter(Boolean))].slice(0, 4);
+
+  const blocked = new Set([
+    'DNA', 'RNA', 'MRNA', 'CELL', 'CELLS', 'CANCER', 'TUMOR', 'TUMOUR',
+    'CRISPR', 'PMID', 'PMC', 'THE', 'AND', 'FOR', 'WITH', 'FROM', 'VIA',
+    'PDAC', 'NSCLC', 'SCLC', 'HCC', 'CRC', 'AML', 'ALL', 'DLBCL', 'GBM', 'RCC',
+  ]);
+  const targetCounts = new Map();
+  for (const match of titleText.matchAll(/\b[A-Z][A-Z0-9]{1,9}(?:[- ](?:[A-Z]?\d{1,4}[A-Z]?|[A-Z]{1,5}))?\b/g)) {
+    const term = cleanTerm(match[0]);
+    if (!term || blocked.has(term) || /^\d+$/.test(term)) continue;
+    const key = term.toLowerCase();
+    targetCounts.set(key, { term, count: (targetCounts.get(key)?.count ?? 0) + 1 });
+  }
+  const targets = [...targetCounts.values()]
+    .sort((a, b) => b.count - a.count || b.term.length - a.term.length)
+    .slice(0, 4)
+    .map(item => item.term);
+
+  const groups = [];
+  if (diseases.length) groups.push(diseases.join(' | '));
+  if (targets.length) groups.push(targets.join(' | '));
+
+  if (!groups.length && titles[0]) {
+    const stopWords = new Set(['with', 'from', 'that', 'this', 'through', 'using', 'reveals', 'drives', 'study']);
+    const phrase = titles[0].split(/\s+/)
+      .map(word => cleanTerm(word))
+      .filter(word => word.length >= 4 && !stopWords.has(word.toLowerCase()))
+      .slice(0, 4)
+      .join(' ');
+    if (phrase) groups.push(phrase);
+  }
+
+  return {
+    focus: '根据种子论文标题生成的保守画像：优先关注相关肿瘤类型、分子靶点、因果机制、遗传学干预、体内模型和患者样本证据。当前 AI 画像推理不可用，请在保存前人工核对检索概念。',
+    query_groups: groups.slice(0, 2),
+    exclude_terms: 'prognostic signature | nomogram',
+    query_plan: {
+      must_count: Math.min(groups.length, 2),
+      should_count: 0,
+      fallback: true,
+      rationale: `AI 画像失败后由标题规则生成：${cleanText(cause?.message, 240)}`,
+    },
+    model: 'heuristic',
+  };
+}
+
+export async function generateProfile(env, papers) {
+  const safePapers = papers.slice(0, 12);
+  const papersText = safePapers.map((paper, index) => (
+    `${index + 1}. PMID ${cleanText(paper.pmid, 20)}\n`
+    + `Title: ${cleanText(paper.title, 300)}\n`
+    + `Abstract: ${cleanText(paper.abstract || 'No abstract', 650)}`
+  )).join('\n\n');
+
+  const messages = [
+    {
+      role: 'system',
+      content: `你是肿瘤分子机制研究者。你的目标不是尽可能罗列关键词，而是生成高召回、可执行的检索计划。\n\n严格规则：\n1. mustConcepts 只能有 1-2 组，表示缺一不可的核心主题，通常是疾病和靶点/核心机制。\n2. shouldConcepts 最多 2 组，只用于严格检索失败后的逐级放宽和后续排序。实验技术默认放 shouldConcepts。\n3. 每组最多 4 个英文标准名或真正高频别名；全部术语合计不超过 16 个。\n4. 不要自动补入过宽父概念，例如已有 KRAS G12D 时不要仅为完整性加入 KRAS。\n5. excludeTerms 最多 3 个，只保留高精度噪声短语。\n6. researcherProfile 用中文概括研究偏好，控制在 250-450 字。\n7. 仅输出 JSON：\n{\n  "researcherProfile": "...",\n  "mustConcepts": [{"terms":["..."]}],\n  "shouldConcepts": [{"terms":["..."]}],\n  "excludeTerms": ["..."],\n  "rationale": "..."\n}`,
+    },
+    { role: 'user', content: `根据以下论文生成画像：\n\n${papersText}` },
+  ];
+
+  try {
+    const { parsed, model } = await runAIForJSON(env, messages, {
+      chain: PROFILE_CHAIN,
+      maxTokens: 850,
+      modelTimeoutMs: 60_000,
+      totalTimeoutMs: 90_000,
+      label: 'profile',
+    });
+    const profile = normalizeProfile(parsed);
+    const queryGroups = [...profile.must, ...profile.should].map(group => group.join(' | '));
+
+    return {
+      focus: profile.focus,
+      query_groups: queryGroups,
+      exclude_terms: profile.excludeTerms.join(' | '),
+      query_plan: {
+        must_count: profile.must.length,
+        should_count: profile.should.length,
+        rationale: profile.rationale,
+      },
+      model,
+    };
+  } catch (error) {
+    console.error(`[AI] profile fallback: ${error.message}`);
+    return fallbackProfile(safePapers, error);
+  }
+}
+
+function containsAny(text, terms) {
+  const source = String(text ?? '').toLowerCase();
+  return terms.some(term => source.includes(String(term).toLowerCase()));
+}
+
+export function heuristicScore(article, queryGroups = []) {
+  const title = String(article.title ?? '').toLowerCase();
+  const abstract = String(article.abstract ?? '').toLowerCase();
+  let titleMatches = 0;
+  let abstractMatches = 0;
+
+  for (const group of queryGroups) {
+    const terms = String(group).split('|').map(term => term.trim()).filter(Boolean);
+    if (containsAny(title, terms)) titleMatches += 1;
+    else if (containsAny(abstract, terms)) abstractMatches += 1;
+  }
+
+  const signalText = `${title} ${abstract}`;
+  const mechanistic = /(mechanis|pathway|axis|mediated|dependent|regulat|drives|suppresses)/i.test(signalText);
+  const causal = /(knockout|knockdown|rescue|mutant|inhibitor|overexpression|deletion|crispr)/i.test(signalText);
+  const inVivo = /(mouse|mice|xenograft|organoid|patient-derived|in vivo|clinical sample)/i.test(signalText);
+  const noveltySignal = /(novel|unexpected|previously unknown|first|uncover|reveal)/i.test(signalText);
+  const hasAbstract = abstract.length >= 120;
+
+  const relevance = clampInt(4 + titleMatches * 2 + abstractMatches, 1, 10);
+  const evidence = clampInt(3 + Number(causal) * 2 + Number(inVivo) * 2 + Number(hasAbstract), 1, 10);
+  const novelty = clampInt(4 + Number(noveltySignal) * 2 + Number(mechanistic), 1, 10);
+  const surprise = clampInt(4 + Number(/unexpected|paradox|contrary|independent of/i.test(signalText)) * 3, 1, 10);
+  const experimentValue = clampInt(4 + Number(causal) * 2 + Number(mechanistic) + Number(inVivo), 1, 10);
+
+  return {
+    relevance,
+    novelty,
+    evidence,
+    surprise,
+    experiment_value: experimentValue,
+    total: relevance + novelty + evidence + surprise + experimentValue,
+  };
+}
+
+function normalizeRankItems(parsed, articleCount) {
+  const rawItems = Array.isArray(parsed) ? parsed : parsed.items ?? parsed.articles ?? parsed.results ?? [];
+  if (!Array.isArray(rawItems)) return [];
+
+  const seen = new Set();
+  const output = [];
+  for (const raw of rawItems) {
+    const index = Number(raw?.index);
+    if (!Number.isInteger(index) || index < 0 || index >= articleCount || seen.has(index)) continue;
+    seen.add(index);
+    const relevance = clampInt(raw.relevance ?? 5, 1, 10);
+    const novelty = clampInt(raw.novelty ?? 5, 1, 10);
+    const evidence = clampInt(raw.evidence ?? 5, 1, 10);
+    const surprise = clampInt(raw.surprise ?? 5, 1, 10);
+    const experimentValue = clampInt(raw.experiment_value ?? raw.experimentValue ?? 5, 1, 10);
+    output.push({
+      index,
+      relevance,
+      novelty,
+      evidence,
+      surprise,
+      experiment_value: experimentValue,
+      total: relevance + novelty + evidence + surprise + experimentValue,
+    });
+  }
+  return output;
+}
+
+function fallbackAnalysis(article, scores) {
+  const title = cleanText(article.title, 240);
+  const abstract = cleanText(article.abstract, 500);
+  const evidenceLevel = scores.evidence >= 8 ? '强' : scores.evidence >= 5 ? '中' : '弱';
+  return {
+    evidence_level: evidenceLevel,
+    why_interesting: `该论文与当前检索主题匹配，题目为“${title}”。AI 详细解读暂不可用，建议优先核对摘要、实验设计和原始数据。`,
+    mechanism_chain: abstract
+      ? `摘要提示其围绕“${title}”展开；具体因果链需结合全文核验。`
+      : '无可用摘要，无法可靠提取机制链。',
+    key_evidence: abstract ? '请重点核对摘要中提到的干预、对照、体内模型和患者样本证据。' : '无摘要，需直接查看全文。',
+    major_concern: '当前条目仅基于标题、摘要和元数据，不能替代全文质量评估。',
+    next_experiment: '根据论文核心结论设计独立干预与 rescue 实验，并在正交模型中复现。',
+  };
+}
+
+function normalizeEnrichment(parsed, selected) {
+  const rawItems = Array.isArray(parsed) ? parsed : parsed.items ?? parsed.articles ?? [];
+  if (!Array.isArray(rawItems)) return new Map();
+  const map = new Map();
+
+  for (const raw of rawItems) {
+    const index = Number(raw?.index);
+    if (!Number.isInteger(index) || index < 0 || index >= selected.length || map.has(index)) continue;
+    map.set(index, {
+      evidence_level: ['强', '中', '弱'].includes(raw.evidence_level) ? raw.evidence_level : null,
+      why_interesting: cleanText(raw.why_interesting, 700),
+      mechanism_chain: cleanText(raw.mechanism_chain, 500),
+      key_evidence: cleanText(raw.key_evidence, 500),
+      major_concern: cleanText(raw.major_concern, 500),
+      next_experiment: cleanText(raw.next_experiment, 500),
+    });
+  }
+  return map;
+}
+
+export async function scorePapers(env, articles, focus, maxArticles, queryGroups = []) {
+  const batch = articles.slice(0, 10);
+  const focusText = cleanText(
+    focus || '优先原创机制研究、遗传学因果证据、rescue、体内模型和患者样本。',
+    1800,
+  );
+
+  const baseline = batch.map(article => heuristicScore(article, queryGroups));
+  let ranking = baseline.map((score, index) => ({ index, ...score }));
+  const models = [];
+  let rankingAIAvailable = false;
+
+  if (batch.length) {
+    const compactArticles = batch.map((article, index) => (
+      `${index}. ${cleanText(article.title, 260)}\n${cleanText(article.abstract || 'No abstract', 520)}`
+    )).join('\n\n');
+
+    try {
+      const { parsed, model } = await runAIForJSON(env, [
+        {
+          role: 'system',
+          content: `你是肿瘤机制论文筛选器。依据标题和摘要，对每个候选给出五个 1-10 整数分数：relevance、novelty、evidence、surprise、experiment_value。不要生成解释文字。每个候选恰好出现一次。仅输出：{"items":[{"index":0,"relevance":1,"novelty":1,"evidence":1,"surprise":1,"experiment_value":1}]}`,
+        },
+        { role: 'user', content: `研究偏好：${focusText}\n\n候选：\n${compactArticles}` },
+      ], {
+        chain: SCORE_CHAIN, maxTokens: 700, modelTimeoutMs: 50_000,
+        totalTimeoutMs: 75_000, label: 'ranking',
+      });
+
+      const normalized = normalizeRankItems(parsed, batch.length);
+      if (normalized.length) {
+        const byIndex = new Map(normalized.map(item => [item.index, item]));
+        ranking = baseline.map((score, index) => byIndex.get(index) ?? { index, ...score });
+        models.push(model);
+        rankingAIAvailable = true;
+      }
+    } catch (error) {
+      console.error(`[AI] ranking fallback: ${error.message}`);
+    }
+  }
+
+  ranking.sort((a, b) => b.total - a.total || a.index - b.index);
+  const selectedRanks = ranking.slice(0, clampInt(maxArticles, 1, 10));
+  const selected = selectedRanks.map(item => ({ article: batch[item.index], scores: item }));
+  let enrichment = new Map();
+
+  if (selected.length && rankingAIAvailable) {
+    const detailsText = selected.map(({ article, scores }, index) => (
+      `${index}. ${cleanText(article.title, 260)}\n`
+      + `Scores: relevance=${scores.relevance}, novelty=${scores.novelty}, evidence=${scores.evidence}, surprise=${scores.surprise}, experiment_value=${scores.experiment_value}\n`
+      + `Abstract: ${cleanText(article.abstract || 'No abstract', 620)}`
+    )).join('\n\n');
+
+    try {
+      const { parsed, model } = await runAIForJSON(env, [
+        {
+          role: 'system',
+          content: `你是严谨的肿瘤分子机制研究者。仅依据标题和摘要，为已入选论文生成简洁中文解读。不得虚构样本量、模型、统计结果或因果关系；摘要未提供时必须明确说无法判断。仅输出 JSON：{"items":[{"index":0,"evidence_level":"强|中|弱","why_interesting":"1-2句","mechanism_chain":"1句","key_evidence":"1句","major_concern":"1句","next_experiment":"1句"}]}`,
+        },
+        { role: 'user', content: `研究偏好：${focusText}\n\n入选论文：\n${detailsText}` },
+      ], {
+        chain: SCORE_CHAIN, maxTokens: 1800, modelTimeoutMs: 60_000,
+        totalTimeoutMs: 90_000, label: 'enrichment',
+      });
+      enrichment = normalizeEnrichment(parsed, selected);
+      models.push(model);
+    } catch (error) {
+      console.error(`[AI] enrichment fallback: ${error.message}`);
+    }
+  }
+
+  const output = selected.map(({ article, scores }, index) => {
+    const fallback = fallbackAnalysis(article, scores);
+    const detail = enrichment.get(index) ?? {};
+    return {
+      ...article,
+      rank: index + 1,
+      relevance: scores.relevance,
+      novelty: scores.novelty,
+      evidence: scores.evidence,
+      surprise: scores.surprise,
+      experiment_value: scores.experiment_value,
+      total: scores.total,
+      evidence_level: detail.evidence_level || fallback.evidence_level,
+      why_interesting: detail.why_interesting || fallback.why_interesting,
+      mechanism_chain: detail.mechanism_chain || fallback.mechanism_chain,
+      key_evidence: detail.key_evidence || fallback.key_evidence,
+      major_concern: detail.major_concern || fallback.major_concern,
+      next_experiment: detail.next_experiment || fallback.next_experiment,
+    };
+  });
+
+  const uniqueModels = [...new Set(models)];
+  return {
+    articles: output,
+    models: uniqueModels,
+    model: uniqueModels.length ? uniqueModels.map(model => MODEL_LABELS[model] || model).join(' + ') : MODEL_LABELS.heuristic,
+  };
+}
+
+function clampInt(value, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return min;
+  return Math.min(max, Math.max(min, Math.round(number)));
 }
