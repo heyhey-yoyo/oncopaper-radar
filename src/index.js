@@ -13,6 +13,8 @@ import {
   normalizeQueryGroups,
 } from './query.js';
 
+// ⚠️ D1 SQL变量上限较低，chunk 控制在 30 以内避免 "too many SQL variables"
+const D1_BIND_CHUNK = 30;
 const MAX_CANDIDATES = 80;
 const MIN_SEARCH_RESULTS = 5;
 const RUN_STALE_MINUTES = 120;
@@ -827,7 +829,7 @@ async function prepareCandidates(env, runId, settings, searchResult) {
 
 async function loadCandidateMetadata(env, canonicalIds) {
   const map = new Map();
-  for (const ids of chunk(canonicalIds, 60)) {
+  for (const ids of chunk(canonicalIds, D1_BIND_CHUNK)) {
     if (!ids.length) continue;
     const placeholders = ids.map(() => '?').join(',');
     const rows = (await env.DB.prepare(`
@@ -869,7 +871,7 @@ async function loadCandidateState(env, candidates, profileHash) {
   const selected = new Set();
   const processed = new Set();
 
-  for (const ids of chunk(canonicalIds, 60)) {
+  for (const ids of chunk(canonicalIds, D1_BIND_CHUNK)) {
     const placeholders = ids.map(() => '?').join(',');
     const rows = (await env.DB.prepare(`
       SELECT canonical_id, profile_hash, prompt_version, scored_at
@@ -887,7 +889,7 @@ async function loadCandidateState(env, candidates, profileHash) {
   const selectedPMIDs = new Set();
   const selectedDOIs = new Set();
   const selectedIds = new Set();
-  const chunkSize = 50;
+  const chunkSize = D1_BIND_CHUNK;
 
   for (let offset = 0; offset < candidates.length; offset += chunkSize) {
     const slice = candidates.slice(offset, offset + chunkSize);
