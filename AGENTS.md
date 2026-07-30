@@ -61,7 +61,7 @@ npm run db:show:remote         # 查看 settings 表（远程）
 ## AI 模型配置（`src/ai.js`）
 
 | 常量 | 值 | 说明 |
-|------|-----|------|
+| --- | --- | --- |
 | `QWEN` | `@cf/qwen/qwen3-30b-a3b-fp8` | 主力模型 |
 | `GRANITE` | `@cf/ibm-granite/granite-4.0-h-micro` | 兜底模型 |
 | `PROFILE_CHAIN` | `[QWEN, GRANITE]` | 画像生成模型链 |
@@ -111,7 +111,7 @@ strict（全部概念组）→ without-optional → required-without-negative-te
 
 ### Workflow 步骤
 | 步骤 | 配置 | 内容 |
-|------|------|------|
+| --- | --- | --- |
 | search-literature | retries 3, timeout 5min | Europe PMC + PubMed 双源搜索，写入候选元数据 |
 | prepare-candidates | 默认 | 去重、规则预排序 |
 | score-papers | retries 1, timeout 10min | AI 两阶段评分 |
@@ -120,7 +120,7 @@ strict（全部概念组）→ without-optional → required-without-negative-te
 ## API 路由
 
 | 方法 | 路径 | 认证 | 说明 |
-|------|------|------|------|
+| --- | --- | --- |------|
 | GET | `/api/auth/check` | 需要 | 验证令牌 |
 | GET | `/api/settings` | 公开 | 读取设置 |
 | POST | `/api/settings` | 需要 | 保存设置 |
