@@ -1,14 +1,14 @@
 # OncoPaper Radar
 
-一个可直接部署到 Cloudflare 的个人科研文献雷达 Demo，面向肿瘤分子机制研究。
+肿瘤分子机制文献雷达 — 部署在 Cloudflare Workers 上，每日自动检索、AI 评分、生成个性化科研简报。
 
 它会：
 
-1. 按你的关键词检索 Europe PMC 最近几天的新文章；
-2. 用 D1 排除已经推送过的文章；
-3. 让 Workers AI 按相关性、新颖性、证据强度、反直觉程度和实验启发评分；
-4. 在网页中展示“为什么值得看、机制链、关键证据、主要疑点、最小判别实验”；
-5. 由 Cron Trigger 每天自动运行。
+1. 按你的关键词同时检索 **Europe PMC + PubMed**，自动补全摘要并去重；
+2. 查询按**严格到宽松逐级降级**，不会因为查不到就返回空；
+3. 用 Workers AI 做**两阶段评分**（先打分、再写解读），AI 全挂也能规则兜底出简报；
+4. 同步和画像生成跑在 **Cloudflare Workflows** 上，HTTP 请求立即返回，前端轮询进度；
+5. **Cron Trigger** 每天 UTC 05:00 自动运行。
 
 > 这是科研信息筛选工具，不是生物医学结论的最终裁判。AI 解读只依据标题、摘要与元数据，关键结论必须回到原文和原始数据核验。
 
@@ -17,33 +17,32 @@
 ## 目录
 
 ```text
-oncopaper-radar-demo/
+oncopaper-radar/
 ├─ public/
 │  ├─ index.html
 │  ├─ styles.css
 │  └─ app.js
 ├─ src/
-│  └─ index.js
+│  ├─ index.js          # Worker 入口、API 路由、Workflow 定义
+│  ├─ ai.js             # AI 调用、两阶段评分、规则回退
+│  └─ query.js          # 检索词清洗、Europe PMC/PubMed 查询构造
+├─ test/
+│  ├─ ai.test.js        # AI 评分边界与故障降级测试
+│  └─ query.test.js     # 查询构造回归测试
 ├─ package.json
 ├─ schema.sql
 └─ wrangler.jsonc
 ```
 
-## 0. 先看视觉 Demo
+## 0. Demo 模式
 
-直接打开 `public/index.html`，或者在部署后的网址后加：
-
-```text
-?demo=1
-```
-
-例如：
+在部署后的网址后加 `?demo=1`：
 
 ```text
 https://你的项目.workers.dev/?demo=1
 ```
 
-演示模式使用假数据，不调用 Europe PMC、Workers AI 或 D1。
+演示模式使用假数据，不调用外部 API 或 AI。
 
 ---
 
@@ -55,15 +54,11 @@ https://你的项目.workers.dev/?demo=1
 - Node.js 18 或更高版本；
 - 能运行终端命令。
 
-解压后进入项目目录：
-
 ```bash
-cd oncopaper-radar-demo
+cd oncopaper-radar
 npm install
 npx wrangler login
 ```
-
-登录命令会打开浏览器，让你授权 Wrangler 使用 Cloudflare 账户。
 
 ---
 
@@ -83,15 +78,9 @@ npx wrangler d1 create oncopaper-radar
 }
 ```
 
-打开 `wrangler.jsonc`，将：
+打开 `wrangler.jsonc`，将 `d1_databases[0].database_id` 替换为返回的真实 ID。
 
-```text
-REPLACE_WITH_YOUR_D1_DATABASE_ID
-```
-
-替换成上一步返回的真实 `database_id`。
-
-不要改绑定名 `DB`，后端代码通过 `env.DB` 访问数据库。
+> 不要改绑定名 `DB`，后端代码通过 `env.DB` 访问数据库。
 
 ---
 
@@ -101,30 +90,25 @@ REPLACE_WITH_YOUR_D1_DATABASE_ID
 npm run db:init:remote
 ```
 
-看到 SQL 执行成功后，可以检查默认配置：
-
-```bash
-npm run db:show:remote
-```
+> 新版代码包含运行时迁移，后续部署不需要再手动执行 SQL。但首次使用仍需初始化。
 
 ---
 
-## 4. 建议设置管理员令牌
+## 4. 必须设置管理员令牌
 
-不设置令牌时，任何拿到网站地址的人都可以保存配置或触发 AI 同步。个人测试可以先不设置；公开部署强烈建议设置：
+新版**要求**设置令牌，未配置时所有管理 API 返回 503：
 
 ```bash
 npx wrangler secret put ADMIN_TOKEN
 ```
 
-输入一串你自己生成的长随机字符串。部署后点击网页右上角“管理员令牌”，填入同一个字符串。
+输入一串你自己生成的长随机字符串。部署后点击网页右上角登录按钮，填入同一个字符串。
 
-令牌只保护：
+可选：设置 NCBI API Key 以提高 PubMed 请求额度：
 
-- 保存配置；
-- 手动触发同步。
-
-读取简报仍然是公开的。如果连简报也需要保密，建议再给 Worker 配置 Cloudflare Access。
+```bash
+npx wrangler secret put NCBI_API_KEY
+```
 
 ---
 
@@ -134,30 +118,16 @@ npx wrangler secret put ADMIN_TOKEN
 npm run deploy
 ```
 
-命令完成后会显示类似：
-
-```text
-https://oncopaper-radar.你的子域.workers.dev
-```
-
-打开该地址。
-
-第一次使用：
-
-1. 输入管理员令牌（设置过才需要）；
-2. 检查关键词；
-3. 点击“保存配置”；
-4. 点击“立即同步”；
-5. 等待页面显示入选文章。
+部署时会自动创建 Cloudflare Workflows 绑定（`RADAR_WORKFLOW`），无需手动配置。
 
 ---
 
 ## 6. 关键词怎么写
 
-“检索概念”采用：
+"检索概念"采用：
 
-- 每行是一个必须满足的概念；
-- 同一行用 `|` 写同义词，表示满足其中任意一个。
+- 每行一个概念组，组与组之间是 AND；
+- 同一行用 `|` 分隔同义词，表示 OR。
 
 例如：
 
@@ -167,47 +137,13 @@ pancreatic cancer | pancreatic ductal adenocarcinoma | PDAC
 ferroptosis | lipid peroxidation
 ```
 
-它会构造成大致如下的逻辑：
-
-```text
-(KRAS G12D OR KRASG12D)
-AND
-(pancreatic cancer OR pancreatic ductal adenocarcinoma OR PDAC)
-AND
-(ferroptosis OR lipid peroxidation)
-```
-
-开始时不要放太多行。建议先用 2–3 个核心概念，否则每天可能完全没有结果。
-
-### 示例：肿瘤免疫逃逸
-
-```text
-tumor immune escape | immune evasion
-pancreatic cancer | PDAC
-myeloid | macrophage | neutrophil
-```
-
-### 示例：耐药机制
-
-```text
-osimertinib resistance
-EGFR mutant | EGFR-mutant
-lung cancer | NSCLC
-```
-
-### 示例：表观遗传与代谢
-
-```text
-METTL3 | m6A
-ferroptosis
-cancer
-```
+系统会按**严格到宽松**逐级降级查询——先跑完整关键词组合，如果结果不够，自动去掉可选组、去掉排除词、放宽到核心组，确保不会漏文章。
 
 ---
 
-## 7. “有趣”偏好怎么写
+## 7. "研究者画像"怎么写
 
-这是给 AI 的研究者画像，不是检索式。例如：
+这是给 AI 的偏好描述，影响论文评分倾向。例如：
 
 ```text
 优先原创机制研究；关注遗传学证据、rescue、催化失活突变体、
@@ -215,13 +151,25 @@ cancer
 降低纯生信预后模型、只有相关性表达分析和没有功能验证文章的评分。
 ```
 
-不要在这里放未公开患者信息、身份信息或敏感临床数据。
+也可以粘贴你感兴趣的论文 PMID，让 AI 从论文中自动推断画像。
 
 ---
 
-## 8. 自动运行时间
+## 8. AI 模型与回退策略
 
-`wrangler.jsonc` 当前配置：
+| 模型 | 用途 |
+|------|------|
+| **Qwen3-30B-A3B** | 主力：评分 + 解读 + 画像 |
+| **Granite 4.0 H Micro** | 兜底：Qwen 超时或不可用时接替 |
+| **Heuristic fallback** | 终极兜底：关键词匹配，纯规则评分 |
+
+AI 调用有硬超时保护，两阶段评分（先打分数再写解读），即使所有 AI 模型都不可用也能出简报。
+
+---
+
+## 9. 自动运行
+
+`wrangler.jsonc` 配置：
 
 ```json
 "triggers": {
@@ -229,66 +177,28 @@ cancer
 }
 ```
 
-Cron Trigger 使用 UTC。这代表每天 **05:00 UTC** 执行：
-
-- 芬兰夏令时约 08:00；
-- 芬兰冬令时约 07:00。
-
-需要修改时，编辑 cron 表达式后重新部署：
-
-```bash
-npm run deploy
-```
-
-夏令时切换不会自动改变 UTC cron。如果必须全年固定本地时间，需要按季节调整 cron，或改为更复杂的定时逻辑。
+每天 **05:00 UTC** 执行。需要修改时编辑 cron 表达式后重新部署。
 
 ---
 
-## 9. 本地开发
-
-先初始化本地 D1：
+## 10. 本地开发
 
 ```bash
-npm run db:init:local
+npm run db:init:local    # 初始化本地 D1
+npm run dev               # 启动开发服务器（默认 http://localhost:8787）
+npm run check             # 语法检查
+npm test                  # 运行测试
 ```
-
-再启动：
-
-```bash
-npm run dev
-```
-
-通常地址是：
-
-```text
-http://localhost:8787
-```
-
-配置中 Workers AI 使用 `remote: true`，所以本地开发时模型仍在 Cloudflare 远程运行，也会计入 Workers AI 用量。
-
-测试 scheduled handler：
-
-```bash
-curl "http://localhost:8787/cdn-cgi/handler/scheduled?format=json"
-```
-
-也可以直接在网页点击“立即同步”。
 
 ---
 
-## 10. 常见问题
+## 11. 常见问题
 
 ### 页面提示 D1 尚未初始化
 
-确认：
-
-1. `wrangler.jsonc` 已替换正确的 `database_id`；
-2. 已运行 `npm run db:init:remote`；
-3. 初始化和部署使用的是同一个 Cloudflare 账户。
+确认 `wrangler.jsonc` 已替换正确的 `database_id`，且 `npm run db:init:remote` 已执行。
 
 ### 管理员令牌不正确
-
-重新运行：
 
 ```bash
 npx wrangler secret put ADMIN_TOKEN
@@ -299,43 +209,30 @@ npm run deploy
 
 ### 一篇文章都没有
 
-先尝试：
+先尝试：减少检索概念行数、把回看窗口改成 14 天、删除过于具体的概念、在 Europe PMC 网站上验证检索词。
 
-- 减少“检索概念”的行数；
-- 把回看窗口改成 7 或 14 天；
-- 删除过于具体的一个概念；
-- 检查基因和药物的常用别名；
-- 先在 Europe PMC 网站上验证检索词。
+"All matching papers were already processed" 表示论文都已评过，等新论文出现或修改画像/检索词即可获得新简报。
 
 ### AI 同步报错
 
-可能原因：
-
-- Workers AI 当日免费额度已用完；
-- 模型临时不可用；
-- AI 无法满足 JSON Schema；
-- 候选摘要太少或 Europe PMC 暂时异常。
-
-打开 Cloudflare 控制台中的 Worker 日志查看具体错误。
-
-### 为什么用重叠日期窗口
-
-文献数据库的索引日期和正式发表日期不一定同步。每天回看 4–7 天，再通过 D1 去重，比只检索过去 24 小时更不容易漏文章。
+可能原因：Workers AI 当日免费额度用完、模型临时不可用。系统会自动回退到规则评分，不会丢数据。查看 Cloudflare 控制台 Worker Logs 了解详情。
 
 ---
 
-## 11. 当前 Demo 的边界
+## 12. 当前实现状态
 
 已实现：
 
-- Europe PMC 检索；
-- 多概念 / 同义词检索；
-- 日期窗口；
-- 原创研究排除项；
-- Workers AI 结构化评分；
-- D1 去重与简报存储；
+- Europe PMC + PubMed 双源检索，摘要互补；
+- 查询逐级降级（严格 → 宽松）；
+- Workers AI 两阶段评分（评分 + 解读）；
+- 确定性规则回退（AI 全挂也能出简报）；
+- Cloudflare Workflows 后台任务 + 前端轮询；
+- 画像生成（PMID → AI 推断检索概念）；
+- 去重缓存（同一画像不重复评分）；
+- D1 运行时自动迁移；
 - Cron 每日同步；
-- 可选管理员令牌；
+- 可选 NCBI API Key；
 - 响应式网页。
 
 暂未实现：
@@ -344,24 +241,16 @@ npm run deploy
 - 点赞 / 不感兴趣反馈学习；
 - PDF 全文解析；
 - 多用户账号；
-- Vectorize 语义记忆；
-- PubMed 与 bioRxiv 的独立补充源。
-
-最适合的下一步是接入邮件推送，或加入“👍 有用 / 👎 不相关”反馈表，使筛选偏好逐步个性化。
+- Vectorize 语义记忆。
 
 ---
 
 ## 官方参考
 
-- Cloudflare Workers Static Assets  
-  https://developers.cloudflare.com/workers/static-assets/
-- Workers AI bindings  
-  https://developers.cloudflare.com/workers-ai/configuration/bindings/
-- Workers AI JSON Mode  
-  https://developers.cloudflare.com/workers-ai/features/json-mode/
-- D1 getting started  
-  https://developers.cloudflare.com/d1/get-started/
-- Cron Triggers  
-  https://developers.cloudflare.com/workers/configuration/cron-triggers/
-- Europe PMC REST API  
-  https://europepmc.org/RestfulWebService
+- Cloudflare Workers Static Assets: https://developers.cloudflare.com/workers/static-assets/
+- Cloudflare Workflows: https://developers.cloudflare.com/workflows/
+- Workers AI bindings: https://developers.cloudflare.com/workers-ai/configuration/bindings/
+- D1: https://developers.cloudflare.com/d1/get-started/
+- Cron Triggers: https://developers.cloudflare.com/workers/configuration/cron-triggers/
+- Europe PMC REST API: https://europepmc.org/RestfulWebService
+- PubMed E-utilities: https://www.ncbi.nlm.nih.gov/books/NBK25501/
