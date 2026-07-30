@@ -34,7 +34,7 @@ oncopaper-radar/
 └─ wrangler.jsonc
 ```
 
-## 0. Demo 模式
+## Demo 模式
 
 在部署后的网址后加 `?demo=1`：
 
@@ -46,7 +46,7 @@ https://你的项目.workers.dev/?demo=1
 
 ---
 
-## 1. 准备环境
+## 准备环境
 
 需要：
 
@@ -62,7 +62,7 @@ npx wrangler login
 
 ---
 
-## 2. 创建 D1 数据库
+## 创建 D1 数据库
 
 ```bash
 npx wrangler d1 create oncopaper-radar
@@ -84,7 +84,7 @@ npx wrangler d1 create oncopaper-radar
 
 ---
 
-## 3. 初始化远程数据库
+## 初始化远程数据库
 
 ```bash
 npm run db:init:remote
@@ -94,7 +94,7 @@ npm run db:init:remote
 
 ---
 
-## 4. 必须设置管理员令牌
+## 必须设置管理员令牌
 
 新版**要求**设置令牌，未配置时所有管理 API 返回 503：
 
@@ -112,7 +112,7 @@ npx wrangler secret put NCBI_API_KEY
 
 ---
 
-## 5. 部署
+## 部署
 
 ```bash
 npm run deploy
@@ -122,7 +122,7 @@ npm run deploy
 
 ---
 
-## 6. 关键词怎么写
+## 关键词怎么写
 
 "检索概念"采用：
 
@@ -141,7 +141,7 @@ ferroptosis | lipid peroxidation
 
 ---
 
-## 7. "研究者画像"怎么写
+## 研究者画像怎么写
 
 这是给 AI 的偏好描述，影响论文评分倾向。例如：
 
@@ -155,10 +155,10 @@ ferroptosis | lipid peroxidation
 
 ---
 
-## 8. AI 模型与回退策略
+## AI 模型与回退策略
 
 | 模型 | 用途 |
-|------|------|
+| ---| ---|
 | **Qwen3-30B-A3B** | 主力：评分 + 解读 + 画像 |
 | **Granite 4.0 H Micro** | 兜底：Qwen 超时或不可用时接替 |
 | **Heuristic fallback** | 终极兜底：关键词匹配，纯规则评分 |
@@ -167,7 +167,7 @@ AI 调用有硬超时保护，两阶段评分（先打分数再写解读），�
 
 ---
 
-## 9. 自动运行
+## 自动运行
 
 `wrangler.jsonc` 配置：
 
@@ -181,7 +181,7 @@ AI 调用有硬超时保护，两阶段评分（先打分数再写解读），�
 
 ---
 
-## 10. 本地开发
+## 本地开发
 
 ```bash
 npm run db:init:local    # 初始化本地 D1
@@ -192,13 +192,13 @@ npm test                  # 运行测试
 
 ---
 
-## 11. 常见问题
+## 常见问题
 
-### 页面提示 D1 尚未初始化
+**页面提示 D1 尚未初始化**
 
 确认 `wrangler.jsonc` 已替换正确的 `database_id`，且 `npm run db:init:remote` 已执行。
 
-### 管理员令牌不正确
+**管理员令牌不正确**
 
 ```bash
 npx wrangler secret put ADMIN_TOKEN
@@ -207,19 +207,19 @@ npm run deploy
 
 然后清除网页中的旧令牌，再输入新令牌。
 
-### 一篇文章都没有
+**一篇文章都没有**
 
 先尝试：减少检索概念行数、把回看窗口改成 14 天、删除过于具体的概念、在 Europe PMC 网站上验证检索词。
 
 "All matching papers were already processed" 表示论文都已评过，等新论文出现或修改画像/检索词即可获得新简报。
 
-### AI 同步报错
+**AI 同步报错**
 
 可能原因：Workers AI 当日免费额度用完、模型临时不可用。系统会自动回退到规则评分，不会丢数据。查看 Cloudflare 控制台 Worker Logs 了解详情。
 
 ---
 
-## 12. 当前实现状态
+## 当前实现状态
 
 已实现：
 
