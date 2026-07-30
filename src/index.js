@@ -882,36 +882,49 @@ async function loadCandidateState(env, candidates, profileHash) {
     }
   }
 
-  const pmids = [...new Set(candidates.map(article => article.pmid).filter(Boolean))];
-  const dois = [...new Set(candidates.map(article => article.doi?.toLowerCase()).filter(Boolean))];
-  const ids = candidates.map(article => article.id);
+  // Query articles table in chunks to stay under D1's SQL variable limit.
+  // Each chunk uses at most 50 IDs/PMIDs/DOIs (~150 bindings max).
+  const selectedPMIDs = new Set();
+  const selectedDOIs = new Set();
+  const selectedIds = new Set();
+  const chunkSize = 50;
 
-  const clauses = [];
-  const bindings = [];
-  if (ids.length) {
-    clauses.push(`id IN (${ids.map(() => '?').join(',')})`);
-    bindings.push(...ids);
-  }
-  if (pmids.length) {
-    clauses.push(`pmid IN (${pmids.map(() => '?').join(',')})`);
-    bindings.push(...pmids);
-  }
-  if (dois.length) {
-    clauses.push(`lower(doi) IN (${dois.map(() => '?').join(',')})`);
-    bindings.push(...dois);
-  }
+  for (let offset = 0; offset < candidates.length; offset += chunkSize) {
+    const slice = candidates.slice(offset, offset + chunkSize);
+    const ids = slice.map(article => article.id);
+    const pmids = [...new Set(slice.map(article => article.pmid).filter(Boolean))];
+    const dois = [...new Set(slice.map(article => article.doi?.toLowerCase()).filter(Boolean))];
 
-  if (clauses.length) {
-    const rows = (await env.DB.prepare(`SELECT id, pmid, doi FROM articles WHERE ${clauses.join(' OR ')}`)
-      .bind(...bindings).all()).results;
-    const selectedPMIDs = new Set(rows.map(row => row.pmid).filter(Boolean));
-    const selectedDOIs = new Set(rows.map(row => row.doi?.toLowerCase()).filter(Boolean));
-    const selectedIds = new Set(rows.map(row => row.id));
-    for (const article of candidates) {
-      if (selectedIds.has(article.id) || (article.pmid && selectedPMIDs.has(article.pmid))
-        || (article.doi && selectedDOIs.has(article.doi.toLowerCase()))) {
-        selected.add(article.canonical_id);
+    const clauses = [];
+    const bindings = [];
+    if (ids.length) {
+      clauses.push(`id IN (${ids.map(() => '?').join(',')})`);
+      bindings.push(...ids);
+    }
+    if (pmids.length) {
+      clauses.push(`pmid IN (${pmids.map(() => '?').join(',')})`);
+      bindings.push(...pmids);
+    }
+    if (dois.length) {
+      clauses.push(`lower(doi) IN (${dois.map(() => '?').join(',')})`);
+      bindings.push(...dois);
+    }
+
+    if (clauses.length) {
+      const rows = (await env.DB.prepare(`SELECT id, pmid, doi FROM articles WHERE ${clauses.join(' OR ')}`)
+        .bind(...bindings).all()).results;
+      for (const row of rows) {
+        if (row.id) selectedIds.add(row.id);
+        if (row.pmid) selectedPMIDs.add(row.pmid);
+        if (row.doi) selectedDOIs.add(row.doi.toLowerCase());
       }
+    }
+  }
+
+  for (const article of candidates) {
+    if (selectedIds.has(article.id) || (article.pmid && selectedPMIDs.has(article.pmid))
+      || (article.doi && selectedDOIs.has(article.doi.toLowerCase()))) {
+      selected.add(article.canonical_id);
     }
   }
 
