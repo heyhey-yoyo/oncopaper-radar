@@ -104,7 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   updateQuotaTimer();
-  setInterval(updateQuotaTimer, 30_000);
+  setInterval(updateQuotaTimer, 1_000);
 });
 
 /* ── Auth ─────────────────────────────────────────────────── */
@@ -267,7 +267,8 @@ function renderArticles(data) {
   $('#statusTag').textContent = `${articles.length} selected`;
   $('#statusTag').className = articles.length ? 'status-tag ok' : 'status-tag warn';
   $('#statusMeta').textContent = `From ${digest.candidate_count} candidates`;
-  $('#statusDate').textContent = new Date(digest.run_at).toLocaleString('zh-CN');
+  const runAtUTC = digest.run_at ? `${digest.run_at}Z` : '';
+  $('#statusDate').textContent = new Date(runAtUTC).toLocaleString('zh-CN');
   const modelLabel = digest.model || 'Qwen3-30B-A3B';
   const usedHeuristicOnly = /heuristic/i.test(modelLabel);
   $('#statusAiNote').innerHTML = `
