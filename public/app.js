@@ -286,13 +286,10 @@ function renderArticles(data) {
         </h3>
       </div>
       <div class="article-meta">
-        <span>${esc(article.authors || '-')}</span>
-        <span class="sep">·</span>
-        <span><strong>${esc(article.journal || '-')}</strong></span>
-        <span class="sep">·</span>
-        <span>${esc(article.pub_date || '')}</span>
-        <span class="sep">·</span>
-        <span>Evidence <strong>${esc(article.evidence_level || '-')}</strong></span>
+        <div><span>${esc(article.authors || '-')}</span></div>
+        <div><strong>${esc(article.journal || '-')}</strong></div>
+        <div><span>${esc(article.pub_date || '')}</span></div>
+        <div><span>Evidence <strong>${esc(article.evidence_level || '-')}</strong></span></div>
       </div>
       <div class="scores-row">
         <div class="score-pill">Relevance <strong>${score(article.relevance)}</strong></div>
