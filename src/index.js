@@ -1129,6 +1129,11 @@ async function migrateSchema(env) {
   // Existing installations may predate these columns. Introspection makes the
   // migration repeatable and allows GitHub/Cloudflare auto-deploy without a
   // separate manual D1 migration step.
+  const settingsColumns = (await env.DB.prepare('PRAGMA table_info(settings)').all()).results.map(row => row.name);
+  if (!settingsColumns.includes('generated_profile')) {
+    await env.DB.prepare('ALTER TABLE settings ADD COLUMN generated_profile TEXT').run();
+  }
+
   const digestColumns = (await env.DB.prepare('PRAGMA table_info(digests)').all()).results.map(row => row.name);
   if (!digestColumns.includes('model')) {
     await env.DB.prepare("ALTER TABLE digests ADD COLUMN model TEXT NOT NULL DEFAULT ''").run();
