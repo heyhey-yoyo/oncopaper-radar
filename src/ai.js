@@ -4,6 +4,7 @@
    deterministic fallbacks so a failed inference never loses a run.
    ============================================================ */
 
+// ⚠️ 改模型时同步更新 src/index.js handleModelInfo() 和下面的 MODEL_LABELS
 const QWEN = '@cf/qwen/qwen3-30b-a3b-fp8';
 const GRANITE = '@cf/ibm-granite/granite-4.0-h-micro';
 

@@ -410,6 +410,7 @@ async function handleGetLatestDigest(env) {
   return json({ digest, articles: items });
 }
 
+// ⚠️ 改模型时同步更新这里的字符串（与 src/ai.js 的 MODEL_LABELS 保持一致）
 function handleModelInfo() {
   return json({
     primary: 'Qwen3-30B-A3B',
