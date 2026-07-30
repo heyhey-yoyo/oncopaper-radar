@@ -89,7 +89,7 @@ async function withTimeout(promise, milliseconds, label) {
 
 export async function runAIForJSON(env, messages, options = {}) {
   const chain = options.chain ?? SCORE_CHAIN;
-  const maxTokens = clampInt(options.maxTokens ?? 900, 128, 1800);
+  const maxTokens = clampInt(options.maxTokens ?? 900, 128, 3000);
   const modelTimeoutMs = clampInt(options.modelTimeoutMs ?? 60_000, 10_000, 120_000);
   const totalTimeoutMs = clampInt(options.totalTimeoutMs ?? 90_000, 15_000, 150_000);
   const deadline = Date.now() + totalTimeoutMs;
@@ -507,7 +507,7 @@ export async function scorePapers(env, articles, focus, maxArticles, queryGroups
         },
         { role: 'user', content: `研究偏好：${focusText}\n\n入选论文：\n${detailsText}` },
       ], {
-        chain: SCORE_CHAIN, maxTokens: 1800, modelTimeoutMs: 60_000,
+        chain: SCORE_CHAIN, maxTokens: 2500, modelTimeoutMs: 60_000,
         totalTimeoutMs: 90_000, label: 'enrichment',
       });
       enrichment = normalizeEnrichment(parsed, selected);
