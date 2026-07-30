@@ -758,7 +758,7 @@ function mapEuropePMCArticle(record) {
     doi: record.doi || null,
     title: cleanText(record.title || 'Untitled', 1000),
     authors: cleanText(record.authorString, 1500) || null,
-    journal: cleanText(record.journalTitle, 300) || null,
+    journal: cleanText(record.journalTitle || record.bookTitle || record.source, 300) || null,
     pub_date: record.firstPublicationDate || record.electronicPublicationDate || record.pubYear || null,
     abstract: cleanText(record.abstractText, 12_000) || null,
     article_url: record.doi
