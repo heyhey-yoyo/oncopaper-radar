@@ -1,6 +1,6 @@
 {
   "name": "oncopaper-radar",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "description": "Cloudflare Workers AI + Workflows + D1 for oncology literature discovery",
   "type": "module",
