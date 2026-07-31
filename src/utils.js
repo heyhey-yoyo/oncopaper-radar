@@ -22,6 +22,11 @@ export function cleanTerm(value) {
     .trim();
 }
 
+// 同义词分隔符统一识别：全角｜与半角| 都视为 OR 分隔符
+export function splitOnPipe(value) {
+  return String(value ?? '').replaceAll('｜', '|').split('|');
+}
+
 export function clampInt(value, min, max) {
   const number = Number(value);
   if (!Number.isFinite(number)) return min;

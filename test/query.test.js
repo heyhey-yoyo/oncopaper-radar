@@ -20,6 +20,16 @@ test('query groups are deduplicated and strictly bounded', () => {
   assert.equal(groups[0].split('|').length, 4);
 });
 
+test('full-width pipe is treated as an OR separator', () => {
+  assert.deepEqual(
+    normalizeQueryGroups(['KRAS G12D｜KRASG12D', 'pancreatic cancer ｜ PDAC']),
+    ['KRAS G12D | KRASG12D', 'pancreatic cancer | PDAC'],
+  );
+  assert.deepEqual(normalizeExcludeTerms('nomogram｜review | meta-analysis'), ['nomogram', 'review', 'meta-analysis']);
+  const query = buildEuropePMCQuery(['KRAS G12D｜KRASG12D'], [], false, '2026-07-01', '2026-07-30');
+  assert.match(query, /TITLE_ABS:"KRAS G12D" OR TITLE_ABS:"KRASG12D"/);
+});
+
 test('exclude terms are sanitized, deduplicated, and limited to three', () => {
   assert.deepEqual(
     normalizeExcludeTerms('nomogram | nomogram | prognostic signature | review | fourth'),

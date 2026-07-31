@@ -1,4 +1,4 @@
-import { cleanTerm } from './utils.js';
+import { cleanTerm, splitOnPipe } from './utils.js';
 
 const MAX_QUERY_GROUPS = 5;
 const MAX_TERMS_PER_GROUP = 4;
@@ -7,7 +7,7 @@ const MAX_EXCLUDE_TERMS = 3;
 export function splitGroup(value) {
   const output = [];
   const seen = new Set();
-  for (const item of String(value ?? '').split('|')) {
+  for (const item of splitOnPipe(value)) {
     const term = cleanTerm(item);
     const key = term.toLowerCase();
     if (!term || seen.has(key)) continue;
@@ -35,7 +35,7 @@ export function normalizeQueryGroups(value) {
 }
 
 export function normalizeExcludeTerms(value) {
-  const raw = Array.isArray(value) ? value : String(value ?? '').split('|');
+  const raw = Array.isArray(value) ? value : splitOnPipe(value);
   const output = [];
   const seen = new Set();
   for (const item of raw) {

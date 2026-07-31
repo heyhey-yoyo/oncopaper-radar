@@ -4,7 +4,7 @@
    deterministic fallbacks so a failed inference never loses a run.
    ============================================================ */
 
-import { cleanTerm, cleanText, clampInt } from './utils.js';
+import { cleanTerm, cleanText, clampInt, splitOnPipe } from './utils.js';
 
 // ⚠️ 改模型时只需更新下面的常量；MODEL_LABELS 与
 // src/index.js 的 handleModelInfo() 都会自动跟随。
@@ -132,7 +132,7 @@ function normalizeConcept(raw) {
     : Array.isArray(raw?.terms)
       ? raw.terms
       : typeof raw === 'string'
-        ? raw.split('|')
+        ? splitOnPipe(raw)
         : [];
 
   const seen = new Set();
@@ -179,7 +179,7 @@ function normalizeProfile(parsed) {
     : Array.isArray(parsed.exclude)
       ? parsed.exclude
       : typeof parsed.excludeTerms === 'string'
-        ? parsed.excludeTerms.split('|')
+        ? splitOnPipe(parsed.excludeTerms)
         : [];
 
   const excludeTerms = [];
@@ -342,7 +342,7 @@ export function heuristicScore(article, queryGroups = []) {
   let abstractMatches = 0;
 
   for (const group of queryGroups) {
-    const terms = String(group).split('|').map(term => term.trim()).filter(Boolean);
+    const terms = splitOnPipe(group).map(term => term.trim()).filter(Boolean);
     if (containsAny(title, terms)) titleMatches += 1;
     else if (containsAny(abstract, terms)) abstractMatches += 1;
   }
