@@ -20,10 +20,14 @@ OncoPaper Radar 是一个部署在 **Cloudflare Workers** 上的个人科研文�
 
 ```text
 src/
-├─ index.js      # Worker 入口、API 路由、RadarWorkflow 定义、D1 运行时迁移
+├─ index.js      # Worker 入口、API 路由、RadarWorkflow 定义、候选预排序
 ├─ ai.js         # AI 调用封装、两阶段评分、规则回退（heuristicScore/fallbackProfile/fallbackAnalysis）
 ├─ radar.js      # 论文身份识别、别名生成、多源去重合并、分层探测引擎
-└─ query.js      # 检索词清洗、Europe PMC / PubMed 查询构造
+├─ query.js      # 检索词清洗、Europe PMC / PubMed 查询构造
+├─ search.js     # 文献检索：分层查询、双源抓取、PMID 补全、身份解析
+├─ storage.js    # D1 持久化：运行记录/租约、候选元数据、处理决策、简报
+├─ migrate.js    # D1 运行时迁移（ensureSchema → migrateSchema）
+└─ utils.js      # 共享工具：cleanText/cleanTerm/clampInt/chunk/safeParse/friendlyError/HttpError/D1_BIND_CHUNK
 public/
 ├─ index.html    # 静态页面（不动 HTML 结构和 CSS 就不会影响前端显示）
 ├─ styles.css    # 样式
@@ -70,9 +74,7 @@ npm run db:show:remote         # 查看 settings 表（远程）
 | `SCORE_CHAIN` | `[QWEN, GRANITE]` | 评分模型链 |
 | `PROMPT_VERSION` | `2026-07-30-v3` | 升版号可强制重新评分所有论文 |
 
-改模型时**同步更新**以下两处：
-- `MODEL_LABELS` 常量（`src/ai.js:14`）— 模型 ID → 显示名映射；
-- `handleModelInfo()` 函数（`src/index.js:415`）— 前端 AI Provider 展示。
+改模型时只需更新 `MODEL_LABELS` 常量（`src/ai.js`）——`src/index.js` 的 `handleModelInfo()` 会通过 `MODEL_LABELS[QWEN]` / `MODEL_LABELS[GRANITE]` 自动跟随，无需手动同步。
 
 **Token 配置**：`runAIForJSON` 的 `maxTokens` 通过 `clampInt` 限制在 128–3000。评分阶段用 700 token（只输出分数），解读阶段用 2500 token（输出中文解读）。每个模型调用有 `withTimeout` 硬超时保护。
 
@@ -176,7 +178,7 @@ strict（全部概念组）→ without-optional → required-without-negative-te
 - 纯 HTML/CSS/JS，无框架，无构建工具。
 - `esc()` 对所有用户/API 数据渲染做转义。
 - `api()` helper 统一处理认证头、超时、错误格式化。
-- 保存的 token 存 `localStorage`。
+- 保存的 token 存 `sessionStorage`（关页面即失效，比 localStorage 更安全）。
 - 不改 `index.html` 和 `styles.css` 的情况下可以单独更新 `app.js`。
 - 轮询间隔 2 秒，最多 600 次（20 分钟），超出提示用户关页面稍后重连。
 

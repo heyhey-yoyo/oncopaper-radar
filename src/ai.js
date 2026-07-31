@@ -4,9 +4,12 @@
    deterministic fallbacks so a failed inference never loses a run.
    ============================================================ */
 
-// ⚠️ 改模型时同步更新 src/index.js handleModelInfo() 和下面的 MODEL_LABELS
-const QWEN = '@cf/qwen/qwen3-30b-a3b-fp8';
-const GRANITE = '@cf/ibm-granite/granite-4.0-h-micro';
+import { cleanTerm, cleanText, clampInt } from './utils.js';
+
+// ⚠️ 改模型时只需更新下面的常量；MODEL_LABELS 与
+// src/index.js 的 handleModelInfo() 都会自动跟随。
+export const QWEN = '@cf/qwen/qwen3-30b-a3b-fp8';
+export const GRANITE = '@cf/ibm-granite/granite-4.0-h-micro';
 
 const PROFILE_CHAIN = [QWEN, GRANITE];
 const SCORE_CHAIN = [QWEN, GRANITE];
@@ -121,21 +124,6 @@ export async function runAIForJSON(env, messages, options = {}) {
   }
 
   throw new Error(`All bounded AI attempts failed: ${errors.join(' | ')}`);
-}
-
-function cleanText(value, maxLength = 1000) {
-  return String(value ?? '')
-    .replace(/[\u0000-\u001F\u007F]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, maxLength);
-}
-
-function cleanTerm(value) {
-  return cleanText(value, 100)
-    .replace(/["'`\\()[\]{}:^~*?]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 function normalizeConcept(raw) {
@@ -544,10 +532,4 @@ export async function scorePapers(env, articles, focus, maxArticles, queryGroups
     models: uniqueModels,
     model: uniqueModels.length ? uniqueModels.map(model => MODEL_LABELS[model] || model).join(' + ') : MODEL_LABELS.heuristic,
   };
-}
-
-function clampInt(value, min, max) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return min;
-  return Math.min(max, Math.max(min, Math.round(number)));
 }

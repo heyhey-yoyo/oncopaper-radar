@@ -595,8 +595,7 @@ async function loadModelInfo() {
 }
 
 /* ── Messages ─────────────────────────────────────────────── */
-function showGenerateMsg(text, type, duration = 5_000) {
-  const element = $('#generateMsg');
+function flashMessage(element, text, type, duration) {
   element.textContent = text;
   element.className = `drawer-message ${type}`;
   element.hidden = false;
@@ -604,13 +603,12 @@ function showGenerateMsg(text, type, duration = 5_000) {
   element._timer = setTimeout(() => { element.hidden = true; }, duration);
 }
 
+function showGenerateMsg(text, type, duration = 5_000) {
+  flashMessage($('#generateMsg'), text, type, duration);
+}
+
 function showDrawerMsg(text, type, duration = 4_000) {
-  const element = $('#drawerMessage');
-  element.textContent = text;
-  element.className = `drawer-message ${type}`;
-  element.hidden = false;
-  clearTimeout(element._timer);
-  element._timer = setTimeout(() => { element.hidden = true; }, duration);
+  flashMessage($('#drawerMessage'), text, type, duration);
 }
 
 function showToast(text, type = '') {

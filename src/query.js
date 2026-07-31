@@ -1,22 +1,8 @@
+import { cleanTerm } from './utils.js';
+
 const MAX_QUERY_GROUPS = 5;
 const MAX_TERMS_PER_GROUP = 4;
 const MAX_EXCLUDE_TERMS = 3;
-const MAX_TERM_LENGTH = 100;
-
-function cleanText(value, maxLength) {
-  return String(value ?? '')
-    .replace(/[\u0000-\u001F\u007F]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, maxLength);
-}
-
-function cleanTerm(value) {
-  return cleanText(value, MAX_TERM_LENGTH)
-    .replace(/["'`\\()[\]{}:^~*?]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 export function splitGroup(value) {
   const output = [];

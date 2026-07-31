@@ -23,10 +23,14 @@ oncopaper-radar/
 │  ├─ styles.css
 │  └─ app.js
 ├─ src/
-│  ├─ index.js          # Worker 入口、API 路由、Workflow 定义、D1 运行时迁移
+│  ├─ index.js          # Worker 入口、API 路由、Workflow 定义
 │  ├─ ai.js             # AI 调用、两阶段评分、规则回退
 │  ├─ radar.js          # 论文身份识别、别名、去重合并、分层探测
-│  └─ query.js          # 检索词清洗、Europe PMC/PubMed 查询构造
+│  ├─ query.js          # 检索词清洗、Europe PMC/PubMed 查询构造
+│  ├─ search.js         # 文献检索、双源抓取、身份解析
+│  ├─ storage.js        # D1 持久化（运行记录、简报、处理决策）
+│  ├─ migrate.js        # D1 运行时迁移
+│  └─ utils.js          # 共享工具函数
 ├─ test/
 │  ├─ ai.test.js        # AI 评分边界与故障降级测试
 │  ├─ query.test.js     # 查询构造回归测试

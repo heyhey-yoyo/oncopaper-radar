@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check": "node --check src/ai.js && node --check src/query.js && node --check src/radar.js && node --check src/index.js && node --check public/app.js",
+    "check": "node --check src/ai.js && node --check src/query.js && node --check src/radar.js && node --check src/utils.js && node --check src/search.js && node --check src/storage.js && node --check src/migrate.js && node --check src/index.js && node --check public/app.js",
     "test": "node --test",
     "db:init:local": "wrangler d1 execute oncopaper-radar --local --file=./schema.sql",
     "db:init:remote": "wrangler d1 execute oncopaper-radar --remote --file=./schema.sql",
