@@ -55,7 +55,7 @@ const DEMO_DATA = {
 };
 
 const S = {
-  token: localStorage.getItem('oncopaper_admin_token') || '',
+  token: sessionStorage.getItem('oncopaper_admin_token') || '',
   isLoggedIn: false,
   syncRunning: false,
   profileRunning: false,
@@ -109,6 +109,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 /* ── Auth ─────────────────────────────────────────────────── */
 function updateAuthUI() {
+  const privateControls = drawer.querySelectorAll('input, textarea');
+  privateControls.forEach(control => { control.disabled = !S.isLoggedIn; });
+
   if (S.isLoggedIn) {
     $('#loginBtn').hidden = true;
     $('#logoutBtn').hidden = false;
@@ -135,7 +138,7 @@ async function verifyToken() {
   } catch {
     S.isLoggedIn = false;
     S.token = '';
-    localStorage.removeItem('oncopaper_admin_token');
+    sessionStorage.removeItem('oncopaper_admin_token');
   }
   updateAuthUI();
 }
@@ -166,16 +169,16 @@ async function doLogin() {
   try {
     await api('/auth/check');
     S.isLoggedIn = true;
-    localStorage.setItem('oncopaper_admin_token', token);
+    sessionStorage.setItem('oncopaper_admin_token', token);
     updateAuthUI();
     closeLogin();
     showToast('Logged in', 'success');
-    if (!drawer.hidden) loadSettingsIntoForm();
+    if (!drawer.hidden) await loadSettingsIntoForm();
     resumeActiveSync();
   } catch (error) {
     S.token = '';
     S.isLoggedIn = false;
-    localStorage.removeItem('oncopaper_admin_token');
+    sessionStorage.removeItem('oncopaper_admin_token');
     updateAuthUI();
     showLoginMsg(error.message || 'Invalid token', 'error');
   }
@@ -184,7 +187,8 @@ async function doLogin() {
 function doLogout() {
   S.token = '';
   S.isLoggedIn = false;
-  localStorage.removeItem('oncopaper_admin_token');
+  sessionStorage.removeItem('oncopaper_admin_token');
+  clearPrivateSettingsForm();
   updateAuthUI();
   showToast('Logged out');
 }
@@ -204,7 +208,8 @@ async function openDrawer() {
     overlay.classList.add('show');
     drawer.classList.add('open');
   });
-  await loadSettingsIntoForm();
+  if (S.isLoggedIn) await loadSettingsIntoForm();
+  else clearPrivateSettingsForm();
   loadModelInfo();
   updateAuthUI();
 }
@@ -248,11 +253,11 @@ async function loadLatest() {
   try {
     const data = await api('/digests/latest');
     if (!data.digest) {
-      showEmpty();
+      showEmpty(data.latest_attempt?.status, data.latest_attempt);
       return;
     }
     if (data.digest.status !== 'ok' || !data.articles?.length) {
-      showEmpty(data.digest.status);
+      showEmpty(data.latest_attempt?.status || data.digest.status, data.latest_attempt || data.digest);
       return;
     }
     renderArticles(data);
@@ -262,20 +267,33 @@ async function loadLatest() {
 }
 
 function renderArticles(data) {
-  const { digest, articles } = data;
+  const { digest, articles, latest_attempt: latestAttempt } = data;
+  const latestIsNewerFailure = latestAttempt
+    && latestAttempt.id !== digest.id
+    && latestAttempt.status !== 'ok';
+
   $('#statusBar').hidden = false;
-  $('#statusTag').textContent = `${articles.length} selected`;
-  $('#statusTag').className = articles.length ? 'status-tag ok' : 'status-tag warn';
-  $('#statusMeta').textContent = `From ${digest.candidate_count} candidates`;
-  const runAtUTC = digest.run_at ? `${digest.run_at}Z` : '';
-  $('#statusDate').textContent = new Date(runAtUTC).toLocaleString('zh-CN');
+  $('#statusTag').textContent = latestIsNewerFailure ? 'Previous successful digest' : `${articles.length} selected`;
+  $('#statusTag').className = latestIsNewerFailure ? 'status-tag warn' : 'status-tag ok';
+  $('#statusMeta').textContent = latestIsNewerFailure
+    ? `Latest sync: ${latestAttempt.status}; showing ${articles.length} earlier selections`
+    : `From ${digest.candidate_count} candidates`;
+  $('#statusDate').textContent = formatDatabaseTime(digest.run_at);
   const modelLabel = digest.model || 'Qwen3-30B-A3B';
   const usedHeuristicOnly = /heuristic/i.test(modelLabel);
-  $('#statusAiNote').innerHTML = `
+  const latestNotice = latestIsNewerFailure ? `
+    <span class="run-warning">Latest ${esc(latestAttempt.status)} run at ${esc(formatDatabaseTime(latestAttempt.run_at))}${latestAttempt.message ? `: ${esc(latestAttempt.message)}` : ''}. The papers below are from the most recent successful digest.</span>
+  ` : '';
+  const aiDetails = `
     <span class="ai-badge">${usedHeuristicOnly ? 'Rule Fallback' : 'AI Scored'}</span>
     <span>Model: <strong>${esc(modelLabel)}</strong> via Cloudflare Workers AI. Screened ${Number(digest.candidate_count) || 0} candidates.
     ${usedHeuristicOnly ? 'The AI service was unavailable, so bounded rule-based scoring was used.' : 'Analysis is AI-generated from titles and abstracts only;'} Always verify against full text.</span>
   `;
+  const statusAiNote = $('#statusAiNote');
+  statusAiNote.classList.toggle('has-run-warning', Boolean(latestIsNewerFailure));
+  statusAiNote.innerHTML = latestIsNewerFailure
+    ? `${latestNotice}<span class="ai-note-details">${aiDetails}</span>`
+    : aiDetails;
 
   $('#articlesList').innerHTML = articles.map(article => `
     <article class="article-card">
@@ -337,7 +355,7 @@ function showLoading(text = '加载中...') {
   $('#statusBar').hidden = true;
 }
 
-function showEmpty(reason) {
+function showEmpty(reason, latestAttempt = null) {
   $('#loadingView').hidden = true;
   $('#articlesView').hidden = true;
   $('#statusBar').hidden = true;
@@ -346,18 +364,25 @@ function showEmpty(reason) {
   const title = element.querySelector('h2');
   const paragraph = element.querySelector('p');
   const actions = element.querySelector('.empty-actions');
+  const time = latestAttempt?.run_at ? ` (${formatDatabaseTime(latestAttempt.run_at)})` : '';
 
   if (reason === 'empty') {
     title.textContent = 'No articles selected';
-    paragraph.textContent = 'Recent sync found no new matching articles. Query relaxation and deduplication were applied automatically.';
+    paragraph.textContent = `${latestAttempt?.message || 'Recent sync found no new matching articles.'}${time}`;
     if (actions) actions.style.display = '';
   } else if (reason === 'error') {
-    title.textContent = 'Load failed';
-    paragraph.textContent = 'Check the D1 binding and Worker logs for details.';
+    title.textContent = latestAttempt ? 'Latest sync failed' : 'Load failed';
+    paragraph.textContent = latestAttempt
+      ? `${latestAttempt.message || 'Check the Worker logs for details.'}${time}`
+      : 'Check the D1 binding and Worker logs for details.';
     if (actions) actions.style.display = 'none';
+  } else if (reason === 'skipped') {
+    title.textContent = 'Latest sync was skipped';
+    paragraph.textContent = `${latestAttempt?.message || 'Automatic sync is disabled.'}${time}`;
+    if (actions) actions.style.display = '';
   } else {
     title.textContent = 'No digest yet';
-    paragraph.textContent = 'Configure search keywords and trigger a sync to discover papers.';
+    paragraph.textContent = 'Log in, configure search keywords, and trigger a sync to discover papers.';
     if (actions) actions.style.display = '';
   }
 }
@@ -371,6 +396,17 @@ function showDemoBanner() {
 }
 
 /* ── Settings ─────────────────────────────────────────────── */
+function clearPrivateSettingsForm() {
+  $('#pmidInput').value = '';
+  $('#focus').value = '';
+  $('#queryGroups').value = '';
+  $('#excludeTerms').value = '';
+  $('#maxArticles').value = 5;
+  $('#lookbackDays').value = 7;
+  $('#excludeReviews').checked = true;
+  S.generatedProfile = null;
+}
+
 async function loadSettingsIntoForm() {
   try {
     const settings = await api('/settings');
@@ -601,6 +637,13 @@ function updateQuotaTimer() {
 }
 
 /* ── Utils ────────────────────────────────────────────────── */
+function formatDatabaseTime(value) {
+  if (!value) return '';
+  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN');
+}
+
 function esc(value) {
   if (value === null || value === undefined) return '';
   return String(value)

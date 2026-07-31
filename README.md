@@ -23,12 +23,14 @@ oncopaper-radar/
 │  ├─ styles.css
 │  └─ app.js
 ├─ src/
-│  ├─ index.js          # Worker 入口、API 路由、Workflow 定义
+│  ├─ index.js          # Worker 入口、API 路由、Workflow 定义、D1 运行时迁移
 │  ├─ ai.js             # AI 调用、两阶段评分、规则回退
+│  ├─ radar.js          # 论文身份识别、别名、去重合并、分层探测
 │  └─ query.js          # 检索词清洗、Europe PMC/PubMed 查询构造
 ├─ test/
 │  ├─ ai.test.js        # AI 评分边界与故障降级测试
-│  └─ query.test.js     # 查询构造回归测试
+│  ├─ query.test.js     # 查询构造回归测试
+│  └─ radar.test.js     # 论文身份、候选截断、别名兼容回归测试
 ├─ package.json
 ├─ schema.sql
 └─ wrangler.jsonc
@@ -137,7 +139,7 @@ pancreatic cancer | pancreatic ductal adenocarcinoma | PDAC
 ferroptosis | lipid peroxidation
 ```
 
-系统会按**严格到宽松**逐级降级查询——先跑完整关键词组合，如果结果不够，自动去掉可选组、去掉排除词、放宽到核心组，确保不会漏文章。
+系统会按**严格到宽松**逐级降级查询——先跑完整关键词组合，如果结果不够，自动去掉可选组、去掉排除词、放宽到核心组，确保不会漏文章。候选文章通过别名表（`article_aliases`）跨 PMID/PMCID/DOI/来源统一身份识别，已处理论文不会重复评分。
 
 ---
 
@@ -225,15 +227,19 @@ npm run deploy
 
 - Europe PMC + PubMed 双源检索，摘要互补；
 - 查询逐级降级（严格 → 宽松）；
+- 论文别名表（`article_aliases`）跨 PMID/PMCID/DOI/来源统一身份识别；
+- 新论文优先排序，历史论文不占用候选名额导致空简报；
 - Workers AI 两阶段评分（评分 + 解读）；
 - 确定性规则回退（AI 全挂也能出简报）；
 - Cloudflare Workflows 后台任务 + 前端轮询；
+- 运行租约（`run_leases`）防止并发重复创建 Workflow；
 - 画像生成（PMID → AI 推断检索概念）；
 - 去重缓存（同一画像不重复评分）；
 - D1 运行时自动迁移；
 - Cron 每日同步；
 - 可选 NCBI API Key；
-- 响应式网页。
+- 响应式网页；
+- 安全响应头（CSP、X-Frame-Options）。
 
 暂未实现：
 

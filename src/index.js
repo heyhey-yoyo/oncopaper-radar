@@ -12,6 +12,15 @@ import {
   normalizeExcludeTerms,
   normalizeQueryGroups,
 } from './query.js';
+import {
+  articleIdentityAliases,
+  chooseDigestForDisplay,
+  mergeArticlesByIdentity,
+  normalizeDoi,
+  preferredCanonicalId,
+  probeTiersUntilUsable,
+  processingFingerprintPayload,
+} from './radar.js';
 
 // ⚠️ D1 SQL变量上限较低，chunk 控制在 30 以内避免 "too many SQL variables"
 const D1_BIND_CHUNK = 30;
@@ -43,7 +52,7 @@ export default {
       if (path === '/api/auth/check' && request.method === 'GET') {
         return requireAdminResponse(request, env) ?? json({ ok: true });
       }
-      if (path === '/api/settings' && request.method === 'GET') return handleGetSettings(env);
+      if (path === '/api/settings' && request.method === 'GET') return handleGetSettings(request, env);
       if (path === '/api/settings' && request.method === 'POST') return handleSaveSettings(request, env);
       if (path === '/api/sync' && request.method === 'POST') return handleStartSync(request, env);
       if (path === '/api/generate-profile' && request.method === 'POST') return handleStartProfile(request, env);
@@ -67,13 +76,10 @@ export default {
       await ensureSchema(env);
       const settings = await getSettingsRow(env);
       if (!settings?.enabled) return;
-      const active = await findActiveRun(env, 'sync');
-      if (active) {
-        console.log(`[Cron] sync already active: ${active.id}`);
-        return;
-      }
       const run = await createWorkflowRun(env, 'sync', {});
-      console.log(`[Cron] started workflow ${run.id}`);
+      console.log(run.alreadyRunning
+        ? `[Cron] sync already active: ${run.id}`
+        : `[Cron] started workflow ${run.id}`);
     } catch (error) {
       console.error('[Cron] failed to start workflow', error);
     }
@@ -116,6 +122,12 @@ export class RadarWorkflow extends WorkflowEntrypoint {
         console.error(`[Workflow ${runId}] failed to persist error`, updateError);
       }
       throw error;
+    } finally {
+      try {
+        await releaseRunLease(this.env, runType, runId);
+      } catch (leaseError) {
+        console.error(`[Workflow ${runId}] failed to release run lease`, leaseError);
+      }
     }
   }
 
@@ -188,12 +200,9 @@ export class RadarWorkflow extends WorkflowEntrypoint {
         excludeReviews: Number(settings.exclude_reviews) !== 0,
         queryPlan: normalizeQueryPlan(safeParse(settings.generated_profile, null)),
       };
-      normalized.profileHash = await stableHash(JSON.stringify({
-        queryGroups: normalized.queryGroups,
-        focus: normalized.focus,
-        excludeTerms: normalized.excludeTerms,
-        queryPlan: normalized.queryPlan,
-      }));
+      normalized.profileHash = await stableHash(JSON.stringify(
+        processingFingerprintPayload(normalized, PROMPT_VERSION),
+      ));
       return normalized;
     });
 
@@ -282,7 +291,10 @@ export class RadarWorkflow extends WorkflowEntrypoint {
 }
 
 /* ── HTTP handlers ────────────────────────────────────────── */
-async function handleGetSettings(env) {
+async function handleGetSettings(request, env) {
+  const denied = requireAdminResponse(request, env);
+  if (denied) return denied;
+
   const row = await getSettingsRow(env);
   if (!row) return json({ error: 'Settings not found. Initialize D1 first.' }, 404);
   return json({
@@ -342,13 +354,12 @@ async function handleStartSync(request, env) {
   const denied = requireAdminResponse(request, env);
   if (denied) return denied;
 
-  const active = await findActiveRun(env, 'sync');
-  if (active) {
-    return json({ status: active.status, run_id: active.id, already_running: true }, 202);
-  }
-
   const run = await createWorkflowRun(env, 'sync', {});
-  return json({ status: 'queued', run_id: run.id }, 202);
+  return json({
+    status: run.alreadyRunning ? 'running' : 'queued',
+    run_id: run.id,
+    already_running: run.alreadyRunning,
+  }, 202);
 }
 
 async function handleStartProfile(request, env) {
@@ -362,12 +373,12 @@ async function handleStartProfile(request, env) {
     .slice(0, 12);
 
   if (!pmids.length) return json({ error: 'Provide 1-12 valid numeric PMIDs.' }, 400);
-  const active = await findActiveRun(env, 'profile');
-  if (active) {
-    return json({ status: active.status, run_id: active.id, already_running: true }, 202);
-  }
   const run = await createWorkflowRun(env, 'profile', { pmids });
-  return json({ status: 'queued', run_id: run.id }, 202);
+  return json({
+    status: run.alreadyRunning ? 'running' : 'queued',
+    run_id: run.id,
+    already_running: run.alreadyRunning,
+  }, 202);
 }
 
 async function handleGetRun(request, env, path) {
@@ -389,16 +400,26 @@ async function handleGetActiveRun(request, env) {
 }
 
 async function handleGetDigests(request, env) {
+  const denied = requireAdminResponse(request, env);
+  if (denied) return denied;
   const limit = clampInt(new URL(request.url).searchParams.get('limit') || 20, 1, 100);
   const rows = (await env.DB.prepare('SELECT * FROM digests ORDER BY run_at DESC LIMIT ?').bind(limit).all()).results;
   return json(rows);
 }
 
 async function handleGetLatestDigest(env) {
-  const digest = await env.DB.prepare("SELECT * FROM digests WHERE status = 'ok' ORDER BY run_at DESC LIMIT 1").first();
-  if (!digest) {
-    const latest = await env.DB.prepare('SELECT * FROM digests ORDER BY run_at DESC LIMIT 1').first();
-    return json({ digest: latest ?? null, articles: [] });
+  const latestAttempt = await env.DB.prepare('SELECT * FROM digests ORDER BY run_at DESC LIMIT 1').first();
+  const latestSuccess = latestAttempt?.status === 'ok'
+    ? latestAttempt
+    : await env.DB.prepare("SELECT * FROM digests WHERE status = 'ok' ORDER BY run_at DESC LIMIT 1").first();
+  const display = chooseDigestForDisplay(latestAttempt, latestSuccess);
+
+  if (!latestSuccess) {
+    return json({
+      digest: display.digest ? publicDigest(display.digest) : null,
+      latest_attempt: display.latestAttempt ? publicDigest(display.latestAttempt) : null,
+      articles: [],
+    });
   }
 
   const items = (await env.DB.prepare(`
@@ -407,9 +428,13 @@ async function handleGetLatestDigest(env) {
     JOIN articles a ON di.article_id = a.id
     WHERE di.digest_id = ?
     ORDER BY di.rank ASC
-  `).bind(digest.id).all()).results;
+  `).bind(latestSuccess.id).all()).results;
 
-  return json({ digest, articles: items });
+  return json({
+    digest: publicDigest(latestSuccess),
+    latest_attempt: display.latestAttempt ? publicDigest(display.latestAttempt) : null,
+    articles: items,
+  });
 }
 
 // ⚠️ 改模型时同步更新这里的字符串（与 src/ai.js 的 MODEL_LABELS 保持一致）
@@ -426,21 +451,54 @@ function handleModelInfo() {
 /* ── Workflow run storage ─────────────────────────────────── */
 async function createWorkflowRun(env, type, params) {
   const id = `${type}-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
-  await env.DB.prepare(`
-    INSERT INTO sync_runs (id, run_type, status, stage, progress, created_at, updated_at)
-    VALUES (?, ?, 'queued', 'queued', 0, datetime('now'), datetime('now'))
-  `).bind(id, type).run();
+  const claimed = await claimWorkflowSlot(env, type, id);
+  if (!claimed) {
+    const active = await findActiveRun(env, type);
+    if (active) return { id: active.id, type, alreadyRunning: true };
+    const lease = await env.DB.prepare('SELECT run_id FROM run_leases WHERE run_type = ?').bind(type).first();
+    if (lease?.run_id) return { id: lease.run_id, type, alreadyRunning: true };
+    throw new HttpError(409, `A ${type} workflow is already being started. Try again shortly.`);
+  }
 
   try {
     await env.RADAR_WORKFLOW.create({ id, params: { ...params, type, runId: id } });
+    return { id, type, alreadyRunning: false };
   } catch (error) {
     await updateRun(env, id, {
       status: 'failed', stage: 'failed', progress: 100,
       error: friendlyError(error), finished_at: new Date().toISOString(),
     });
+    await releaseRunLease(env, type, id);
     throw error;
   }
-  return { id, type };
+}
+
+async function claimWorkflowSlot(env, type, runId) {
+  const modifier = `+${RUN_STALE_MINUTES} minutes`;
+  await env.DB.batch([
+    env.DB.prepare(`
+      INSERT INTO run_leases (run_type, run_id, lease_expires_at, updated_at)
+      VALUES (?, ?, datetime('now', ?), datetime('now'))
+      ON CONFLICT(run_type) DO UPDATE SET
+        run_id = excluded.run_id,
+        lease_expires_at = excluded.lease_expires_at,
+        updated_at = excluded.updated_at
+      WHERE run_leases.lease_expires_at <= datetime('now')
+    `).bind(type, runId, modifier),
+    env.DB.prepare(`
+      INSERT OR IGNORE INTO sync_runs (id, run_type, status, stage, progress, created_at, updated_at)
+      SELECT ?, ?, 'queued', 'queued', 0, datetime('now'), datetime('now')
+      WHERE EXISTS (
+        SELECT 1 FROM run_leases WHERE run_type = ? AND run_id = ?
+      )
+    `).bind(runId, type, type, runId),
+  ]);
+  const run = await env.DB.prepare('SELECT id FROM sync_runs WHERE id = ?').bind(runId).first();
+  return run?.id === runId;
+}
+
+async function releaseRunLease(env, type, runId) {
+  await env.DB.prepare('DELETE FROM run_leases WHERE run_type = ? AND run_id = ?').bind(type, runId).run();
 }
 
 async function findActiveRun(env, type) {
@@ -492,14 +550,15 @@ function serializeRun(row) {
 async function searchLiterature(env, settings) {
   const tiers = buildQueryTiers(settings);
   const counts = [];
-  let chosen = null;
+  let chosenIndex = -1;
 
-  for (const tier of tiers) {
+  for (let index = 0; index < tiers.length; index += 1) {
+    const tier = tiers[index];
     try {
       const count = await countEuropePMC(tier.europeQuery);
       counts.push({ label: tier.label, count });
       if (count >= MIN_SEARCH_RESULTS) {
-        chosen = { ...tier, count };
+        chosenIndex = index;
         break;
       }
     } catch (error) {
@@ -508,63 +567,95 @@ async function searchLiterature(env, settings) {
     }
   }
 
-  if (!chosen) {
+  if (chosenIndex < 0) {
     const positive = counts
-      .map((item, index) => ({ ...item, tier: tiers[index] }))
+      .map((item, index) => ({ ...item, index }))
       .filter(item => Number(item.count) > 0)
       .sort((a, b) => b.count - a.count)[0];
-    if (positive) chosen = { ...positive.tier, count: positive.count };
+    if (positive) chosenIndex = positive.index;
   }
 
-  // If the count endpoint is unavailable or every preflight count is zero,
-  // probe the real search tiers in order. This prevents a transient count
-  // failure from forcing the strictest query or being misreported as no papers.
-  const tiersToProbe = chosen ? [chosen] : tiers;
   const sourceErrors = [];
-  for (const tier of tiersToProbe) {
-    const [europeResult, pubmedResult] = await Promise.allSettled([
-      fetchEuropePMC(tier.europeQuery, 60),
-      fetchPubMed(tier.pubmedQuery, env.NCBI_API_KEY),
-    ]);
+  const probe = await probeTiersUntilUsable({
+    tiers,
+    chosenIndex,
+    maxCandidates: MAX_CANDIDATES,
+    probeTier: async tier => {
+      const [europeResult, pubmedResult] = await Promise.allSettled([
+        fetchEuropePMC(tier.europeQuery, 60),
+        fetchPubMed(tier.pubmedQuery, env.NCBI_API_KEY),
+      ]);
 
-    const europeArticles = europeResult.status === 'fulfilled' ? europeResult.value.articles : [];
-    if (europeResult.status === 'rejected') {
-      sourceErrors.push(`Europe PMC (${tier.label}): ${friendlyError(europeResult.reason)}`);
-      console.error('[Search] Europe PMC', europeResult.reason);
-    }
+      const europeArticles = europeResult.status === 'fulfilled' ? europeResult.value.articles : [];
+      if (europeResult.status === 'rejected') {
+        sourceErrors.push(`Europe PMC (${tier.label}): ${friendlyError(europeResult.reason)}`);
+        console.error('[Search] Europe PMC', europeResult.reason);
+      }
 
-    let pubmedArticles = [];
-    let pubmedIDs = [];
-    if (pubmedResult.status === 'fulfilled') {
-      pubmedIDs = pubmedResult.value.slice(0, 50);
-      const existingPMIDs = new Set(europeArticles.map(article => article.pmid).filter(Boolean));
-      const missing = pubmedIDs.filter(pmid => !existingPMIDs.has(pmid));
-      if (missing.length) pubmedArticles = await fetchPapersByPMIDs(missing, env.NCBI_API_KEY);
-    } else {
-      sourceErrors.push(`PubMed (${tier.label}): ${friendlyError(pubmedResult.reason)}`);
-      console.error('[Search] PubMed', pubmedResult.reason);
-    }
+      let pubmedArticles = [];
+      let pubmedIDs = [];
+      if (pubmedResult.status === 'fulfilled') {
+        pubmedIDs = pubmedResult.value.slice(0, 50);
+        const existingPMIDs = new Set(europeArticles.map(article => article.pmid).filter(Boolean));
+        const missing = pubmedIDs.filter(pmid => !existingPMIDs.has(pmid));
+        if (missing.length) {
+          try {
+            pubmedArticles = await fetchPapersByPMIDs(missing, env.NCBI_API_KEY);
+          } catch (error) {
+            sourceErrors.push(`PubMed metadata (${tier.label}): ${friendlyError(error)}`);
+            console.error('[Search] PubMed metadata lookup', error);
+          }
+        }
+      } else {
+        sourceErrors.push(`PubMed (${tier.label}): ${friendlyError(pubmedResult.reason)}`);
+        console.error('[Search] PubMed', pubmedResult.reason);
+      }
 
-    if (europeResult.status === 'rejected' && pubmedResult.status === 'rejected') {
-      continue;
-    }
+      if (europeResult.status === 'rejected' && pubmedResult.status === 'rejected') {
+        return { success: false, candidates: [], sourceCounts: { europePMC: null, pubmed: null } };
+      }
 
-    const candidates = mergeArticles([...europeArticles, ...pubmedArticles]).slice(0, MAX_CANDIDATES);
-    if (candidates.length || chosen || tier === tiers[tiers.length - 1]) {
+      const candidates = await resolveCandidateIdentities(
+        env,
+        mergeArticles([...europeArticles, ...pubmedArticles]),
+      );
       return {
+        success: true,
         candidates,
-        queryText: `Europe PMC: ${tier.europeQuery}\nPubMed: ${tier.pubmedQuery}`,
-        tierLabel: tier.label,
-        counts,
         sourceCounts: {
           europePMC: europeResult.status === 'fulfilled' ? europeResult.value.hitCount : null,
           pubmed: pubmedIDs.length,
         },
       };
-    }
+    },
+    assessCandidates: async candidates => {
+      if (!candidates.length) return { usableCount: 0, candidates: [] };
+      const state = await loadCandidateState(env, candidates, settings.profileHash);
+      const usable = [];
+      const historical = [];
+      for (const article of candidates) {
+        (state.processed.has(article.canonical_id) ? historical : usable).push(article);
+      }
+      return {
+        usableCount: usable.length,
+        candidates: [...usable, ...historical],
+      };
+    },
+  });
+
+  if (!probe.hadSuccessfulSource) {
+    throw new Error(`Both literature sources failed. ${sourceErrors.slice(-4).join(' | ')}`);
   }
 
-  throw new Error(`Both literature sources failed. ${sourceErrors.slice(-4).join(' | ')}`);
+  const tier = probe.tier || tiers.at(-1);
+  return {
+    candidates: probe.candidates,
+    queryText: `Europe PMC: ${tier.europeQuery}
+PubMed: ${tier.pubmedQuery}`,
+    tierLabel: tier.label,
+    counts,
+    sourceCounts: probe.result?.sourceCounts ?? { europePMC: null, pubmed: null },
+  };
 }
 
 function buildQueryTiers(settings) {
@@ -730,7 +821,7 @@ async function fetchPubMedSummaries(pmids, apiKey) {
   return pmids.map(pmid => {
     const record = data.result?.[pmid];
     if (!record) return null;
-    const doi = record.articleids?.find(item => item.idtype === 'doi')?.value ?? null;
+    const doi = normalizeDoi(record.articleids?.find(item => item.idtype === 'doi')?.value) || null;
     return {
       id: `pubmed_${pmid}`,
       canonical_id: canonicalId({ pmid, doi, source: 'MED', external_id: pmid }),
@@ -755,7 +846,7 @@ function mapEuropePMCArticle(record) {
     external_id: externalId,
     pmid: record.pmid || null,
     pmcid: record.pmcid || null,
-    doi: record.doi || null,
+    doi: normalizeDoi(record.doi) || null,
     title: cleanText(record.title || 'Untitled', 1000),
     authors: cleanText(record.authorString, 1500) || null,
     journal: cleanText(record.journalTitle || record.bookTitle || record.source, 300) || null,
@@ -773,15 +864,9 @@ function mapEuropePMCArticle(record) {
 }
 
 function mergeArticles(articles) {
-  const map = new Map();
-  for (const article of articles) {
-    if (!article?.title) continue;
-    const key = article.canonical_id || canonicalId(article);
-    const existing = map.get(key);
-    if (!existing || (!existing.abstract && article.abstract)) map.set(key, { ...article, canonical_id: key });
-  }
-  return [...map.values()];
+  return mergeArticlesByIdentity(articles);
 }
+
 
 /* ── Dedup, scoring, persistence ──────────────────────────── */
 async function prepareCandidates(env, runId, settings, searchResult) {
@@ -797,13 +882,12 @@ async function prepareCandidates(env, runId, settings, searchResult) {
   }
 
   const state = await loadCandidateState(env, candidates, settings.profileHash);
-  const fresh = candidates.filter(article => !state.selected.has(article.canonical_id)
-    && !state.processed.has(article.canonical_id));
+  const fresh = candidates.filter(article => !state.processed.has(article.canonical_id));
 
   if (!fresh.length) {
     const result = {
       status: 'empty', selected_count: 0, candidate_count: candidates.length,
-      message: 'All matching papers were already processed for the current profile.',
+      message: 'All matching papers were already scored for the current settings.',
       query_tier: searchResult.tierLabel,
     };
     await storeEmptyDigest(env, runId, searchResult.queryText, candidates.length, 'empty', result.message);
@@ -825,6 +909,37 @@ async function prepareCandidates(env, runId, settings, searchResult) {
     toScore: ranked.slice(0, scoringLimit).map(item => item.article),
     preFilteredIds: ranked.slice(scoringLimit).map(item => item.article.canonical_id),
   };
+}
+
+async function resolveCandidateIdentities(env, candidates) {
+  const merged = mergeArticles(candidates);
+  const aliases = [...new Set(merged.flatMap(articleIdentityAliases))];
+  const aliasRows = new Map();
+  const canonicalArticleIds = new Map();
+
+  for (const aliasChunk of chunk(aliases, D1_BIND_CHUNK)) {
+    if (!aliasChunk.length) continue;
+    const placeholders = aliasChunk.map(() => '?').join(',');
+    const rows = (await env.DB.prepare(`
+      SELECT aa.alias, aa.canonical_id, pa.article_id
+      FROM article_aliases aa
+      LEFT JOIN processed_articles pa ON pa.canonical_id = aa.canonical_id
+      WHERE aa.alias IN (${placeholders})
+    `).bind(...aliasChunk).all()).results;
+    for (const row of rows) {
+      aliasRows.set(row.alias, row.canonical_id);
+      if (row.article_id) canonicalArticleIds.set(row.canonical_id, row.article_id);
+    }
+  }
+
+  return merged.map(article => {
+    const aliasesForArticle = articleIdentityAliases(article);
+    const canonicalId = aliasesForArticle.map(alias => aliasRows.get(alias)).find(Boolean)
+      || article.canonical_id
+      || preferredCanonicalId(article);
+    const articleId = canonicalArticleIds.get(canonicalId) || article.id;
+    return { ...article, id: articleId, canonical_id: canonicalId };
+  });
 }
 
 async function loadCandidateMetadata(env, canonicalIds) {
@@ -852,7 +967,7 @@ async function upsertCandidateMetadata(env, candidates) {
       first_seen_at, last_seen_at
     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'), datetime('now'))
     ON CONFLICT(canonical_id) DO UPDATE SET
-      article_id = excluded.article_id,
+      article_id = processed_articles.article_id,
       pmid = COALESCE(excluded.pmid, processed_articles.pmid),
       pmcid = COALESCE(excluded.pmcid, processed_articles.pmcid),
       doi = COALESCE(excluded.doi, processed_articles.doi),
@@ -864,14 +979,23 @@ async function upsertCandidateMetadata(env, candidates) {
     article.title, JSON.stringify(article),
   ));
   await batchInChunks(env.DB, statements, 40);
+
+  const aliasStatements = candidates.flatMap(article => articleIdentityAliases(article).map(alias => env.DB.prepare(`
+    INSERT INTO article_aliases (alias, canonical_id, created_at, updated_at)
+    VALUES (?, ?, datetime('now'), datetime('now'))
+    ON CONFLICT(alias) DO UPDATE SET
+      canonical_id = excluded.canonical_id,
+      updated_at = datetime('now')
+  `).bind(alias, article.canonical_id)));
+  await batchInChunks(env.DB, aliasStatements, 40);
 }
 
 async function loadCandidateState(env, candidates, profileHash) {
   const canonicalIds = candidates.map(article => article.canonical_id);
-  const selected = new Set();
   const processed = new Set();
 
   for (const ids of chunk(canonicalIds, D1_BIND_CHUNK)) {
+    if (!ids.length) continue;
     const placeholders = ids.map(() => '?').join(',');
     const rows = (await env.DB.prepare(`
       SELECT canonical_id, profile_hash, prompt_version, scored_at
@@ -884,53 +1008,7 @@ async function loadCandidateState(env, candidates, profileHash) {
     }
   }
 
-  // Query articles table in chunks to stay under D1's SQL variable limit.
-  // Each chunk uses at most 50 IDs/PMIDs/DOIs (~150 bindings max).
-  const selectedPMIDs = new Set();
-  const selectedDOIs = new Set();
-  const selectedIds = new Set();
-  const chunkSize = D1_BIND_CHUNK;
-
-  for (let offset = 0; offset < candidates.length; offset += chunkSize) {
-    const slice = candidates.slice(offset, offset + chunkSize);
-    const ids = slice.map(article => article.id);
-    const pmids = [...new Set(slice.map(article => article.pmid).filter(Boolean))];
-    const dois = [...new Set(slice.map(article => article.doi?.toLowerCase()).filter(Boolean))];
-
-    const clauses = [];
-    const bindings = [];
-    if (ids.length) {
-      clauses.push(`id IN (${ids.map(() => '?').join(',')})`);
-      bindings.push(...ids);
-    }
-    if (pmids.length) {
-      clauses.push(`pmid IN (${pmids.map(() => '?').join(',')})`);
-      bindings.push(...pmids);
-    }
-    if (dois.length) {
-      clauses.push(`lower(doi) IN (${dois.map(() => '?').join(',')})`);
-      bindings.push(...dois);
-    }
-
-    if (clauses.length) {
-      const rows = (await env.DB.prepare(`SELECT id, pmid, doi FROM articles WHERE ${clauses.join(' OR ')}`)
-        .bind(...bindings).all()).results;
-      for (const row of rows) {
-        if (row.id) selectedIds.add(row.id);
-        if (row.pmid) selectedPMIDs.add(row.pmid);
-        if (row.doi) selectedDOIs.add(row.doi.toLowerCase());
-      }
-    }
-  }
-
-  for (const article of candidates) {
-    if (selectedIds.has(article.id) || (article.pmid && selectedPMIDs.has(article.pmid))
-      || (article.doi && selectedDOIs.has(article.doi.toLowerCase()))) {
-      selected.add(article.canonical_id);
-    }
-  }
-
-  return { selected, processed };
+  return { processed };
 }
 
 async function persistProcessingDecisions(env, settings, selectedArticles, scoredCandidates, preFiltered, scoreModel) {
@@ -959,8 +1037,8 @@ async function persistProcessingDecisions(env, settings, selectedArticles, score
   for (const canonicalId of preFiltered) {
     statements.push(env.DB.prepare(`
       UPDATE processed_articles SET
-        profile_hash = ?, prompt_version = ?, decision = 'pre_filtered',
-        scored_at = datetime('now'), last_seen_at = datetime('now')
+        profile_hash = ?, prompt_version = ?, score_json = NULL, score_model = NULL,
+        decision = 'pre_filtered', scored_at = NULL, last_seen_at = datetime('now')
       WHERE canonical_id = ?
     `).bind(settings.profileHash, PROMPT_VERSION, canonicalId));
   }
@@ -1138,6 +1216,19 @@ async function migrateSchema(env) {
       decision TEXT,
       scored_at TEXT
     )`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS article_aliases (
+      alias TEXT PRIMARY KEY,
+      canonical_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (canonical_id) REFERENCES processed_articles(canonical_id) ON DELETE CASCADE
+    )`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS run_leases (
+      run_type TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      lease_expires_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`),
   ];
   await env.DB.batch(statements);
 
@@ -1158,6 +1249,32 @@ async function migrateSchema(env) {
   }
 
   await env.DB.batch([
+    env.DB.prepare(`INSERT OR IGNORE INTO article_aliases (alias, canonical_id, created_at, updated_at)
+      SELECT 'pmid:' || trim(pmid), canonical_id, datetime('now'), datetime('now')
+      FROM processed_articles WHERE pmid IS NOT NULL AND trim(pmid) <> ''`),
+    env.DB.prepare(`INSERT OR IGNORE INTO article_aliases (alias, canonical_id, created_at, updated_at)
+      SELECT 'pmcid:' || lower(trim(pmcid)), canonical_id, datetime('now'), datetime('now')
+      FROM processed_articles WHERE pmcid IS NOT NULL AND trim(pmcid) <> ''`),
+    env.DB.prepare(`INSERT OR IGNORE INTO article_aliases (alias, canonical_id, created_at, updated_at)
+      SELECT 'doi:' || lower(trim(doi)), canonical_id, datetime('now'), datetime('now')
+      FROM processed_articles WHERE doi IS NOT NULL AND trim(doi) <> ''`),
+    env.DB.prepare(`INSERT OR IGNORE INTO article_aliases (alias, canonical_id, created_at, updated_at)
+      SELECT canonical_id, canonical_id, datetime('now'), datetime('now')
+      FROM processed_articles WHERE canonical_id IS NOT NULL AND trim(canonical_id) <> ''`),
+    env.DB.prepare(`INSERT OR IGNORE INTO article_aliases (alias, canonical_id, created_at, updated_at)
+      SELECT
+        'source:' || lower(substr(canonical_id, 1, instr(canonical_id, ':') - 1)) || ':' ||
+          lower(substr(canonical_id, instr(canonical_id, ':') + 1)),
+        canonical_id,
+        datetime('now'),
+        datetime('now')
+      FROM processed_articles
+      WHERE (pmid IS NULL OR trim(pmid) = '')
+        AND (pmcid IS NULL OR trim(pmcid) = '')
+        AND (doi IS NULL OR trim(doi) = '')
+        AND instr(canonical_id, ':') > 1
+        AND canonical_id NOT LIKE 'source:%'
+        AND canonical_id NOT LIKE 'unknown:%'`),
     env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_digests_run_at ON digests(run_at DESC)'),
     env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_digests_run_id ON digests(run_id)'),
     env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_articles_pmid ON articles(pmid)'),
@@ -1166,6 +1283,7 @@ async function migrateSchema(env) {
     env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_processed_articles_pmid ON processed_articles(pmid)'),
     env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_processed_articles_doi ON processed_articles(doi)'),
     env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_processed_articles_scored ON processed_articles(profile_hash, prompt_version, scored_at)'),
+    env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_article_aliases_canonical ON article_aliases(canonical_id)'),
   ]);
 }
 /* ── Utilities ────────────────────────────────────────────── */
@@ -1211,11 +1329,21 @@ function cleanText(value, maxLength = 1000) {
 }
 
 function canonicalId(article) {
-  if (article.doi) return `doi:${String(article.doi).trim().toLowerCase()}`;
-  if (article.pmid) return `pmid:${String(article.pmid).trim()}`;
-  if (article.pmcid) return `pmcid:${String(article.pmcid).trim().toLowerCase()}`;
-  return `${String(article.source || 'unknown').toLowerCase()}:${String(article.external_id || article.id)}`;
+  return preferredCanonicalId(article);
 }
+
+function publicDigest(row) {
+  return {
+    id: row.id,
+    run_at: row.run_at,
+    candidate_count: row.candidate_count,
+    selected_count: row.selected_count,
+    status: row.status,
+    model: row.model,
+    message: row.status === 'ok' ? null : cleanText(row.error, 300),
+  };
+}
+
 
 function parseDateScore(value) {
   const timestamp = Date.parse(value || '');
@@ -1278,6 +1406,7 @@ function json(data, status = 200) {
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'same-origin',
+      'X-Frame-Options': 'DENY',
     },
   });
 }
@@ -1310,6 +1439,8 @@ async function serveAssets(request, env) {
   headers.set('X-Content-Type-Options', 'nosniff');
   headers.set('Referrer-Policy', 'same-origin');
   headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  headers.set('X-Frame-Options', 'DENY');
+  headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
   return new Response(response.body, { status: response.status, headers });
 }
 
