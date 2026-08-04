@@ -57,7 +57,7 @@ https://你的项目.workers.dev/?demo=1
 需要：
 
 - 一个 Cloudflare 账户；
-- Node.js 18 或更高版本；
+- Node.js 22 或更高版本（wrangler 4.x 要求）；
 - 能运行终端命令。
 
 ```bash
@@ -164,7 +164,7 @@ ferroptosis | lipid peroxidation
 ## AI 模型与回退策略
 
 | 模型 | 用途 |
-| ---| ---|
+| --- | --- |
 | **Qwen3-30B-A3B** | 主力：评分 + 解读 + 画像 |
 | **Granite 4.0 H Micro** | 兜底：Qwen 超时或不可用时接替 |
 | **Heuristic fallback** | 终极兜底：关键词匹配，纯规则评分 |

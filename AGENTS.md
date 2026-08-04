@@ -45,7 +45,7 @@ test/
 - **绑定**（通过 `env.*` 访问，不要改名）：
   - `env.DB` — D1 数据库；
   - `env.AI` — Workers AI；
-  - `env.ASSETS` — 静态资源目录 `./public`；`/api/*` 由 Worker 优先处理（`run_worker_first`），其余回退到 SPA；
+  - `env.ASSETS` — 静态资源目录 `./public`；所有路径由 Worker 优先处理（`run_worker_first: ["/*"]`），Worker 内部对非 `/api/*` 请求回退到静态资源（serveAssets）；
   - `env.RADAR_WORKFLOW` — Cloudflare Workflows 绑定，用于创建后台任务。
 - **Secrets**：`ADMIN_TOKEN`（**必须设置**，否则管理 API 返回 503）、`NCBI_API_KEY`（可选，提高 PubMed 请求额度）。
 - **Cron**：`triggers.crons: ["0 5 * * *"]`（UTC），改后需重新部署。
@@ -151,7 +151,7 @@ strict（全部概念组）→ without-optional → required-without-negative-te
 ## API 路由
 
 | 方法 | 路径 | 认证 | 说明 |
-| --- | --- | --- |------|
+| --- | --- | --- | --- |
 | GET | `/api/auth/check` | 需要 | 验证令牌 |
 | GET | `/api/settings` | 需要 | 读取设置 |
 | POST | `/api/settings` | 需要 | 保存设置 |
