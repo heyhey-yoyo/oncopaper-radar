@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(git commit -m '大更新: AI 画像生成、去除 emoji、修复登录状态 *)"
-    ]
-  }
-}
