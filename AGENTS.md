@@ -1,4 +1,4 @@
-# AGENTS.md
+# OncoPaper Radar — 项目说明（供 AI 编程代理阅读）
 
 本文件供 AI 编码代理阅读，描述 OncoPaper Radar 项目的架构、命令与约定。
 
