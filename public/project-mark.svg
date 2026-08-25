@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <title>OncoPaper Radar</title><rect x="2" y="2" width="44" height="44" rx="4" fill="#24221f"/>
+  <path d="M11 9h18l8 8v22H11zM29 9v9h8" fill="none" stroke="#f3eee5" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M17 31a10 10 0 0 1 14-9M17 31a5 5 0 0 1 7-5" fill="none" stroke="#c15f3c" stroke-width="2.2" stroke-linecap="round"/>
+  <circle cx="17" cy="31" r="3" fill="#c15f3c"/>
+</svg>

@@ -196,3 +196,8 @@ strict（全部概念组）→ without-optional → required-without-negative-te
 ## 界面维护约定
 
 正文使用 `ydchen-portfolio` 的米白 / 赤陶色视觉系统；`YDchen Tools` 页眉是受保护的品牌区域，后续调整不得改变其结构与样式，API、评分和轮询语义也必须保持不变。
+
+
+## 标志维护约定
+
+`YDchen Tools` 文字页眉是受保护的品牌区域，必须保持原结构、尺寸与样式；项目专属统一标志仅用于 favicon 或现有非页眉标志，不得改变页面布局。
