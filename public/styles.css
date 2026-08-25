@@ -628,3 +628,16 @@ p { margin: 0; }
   color: var(--amber);
   font-weight: 600;
 }
+/* Portfolio visual system for the body. The YDchen Tools header above is intentionally unchanged. */
+:root{--bg:#f3eee5;--surface:rgba(255,252,247,.84);--surface-soft:#ebe4d8;--text:#24221f;--text2:#6f6a62;--text3:#938b80;--line:rgba(36,34,31,.18);--primary:#c15f3c;--primary-hover:#a94f31;--primary-soft:#f0ded4;--accent:#c15f3c;--accent-hover:#a94f31;--accent-soft:#f0ded4;--purple:#8e6b80;--purple-soft:#f1e7ec;--green:#357b56;--green-soft:#e5f1e8;--amber:#a56b2b;--amber-soft:#f6e9d4;--red:#b84a45;--red-soft:#f6dfdd;--radius-sm:0;--radius:0;--radius-lg:0;--shadow:0 14px 32px rgba(36,34,31,.06);--shadow-md:var(--shadow);--shadow-lg:var(--shadow)}
+body{background:radial-gradient(circle at 84% -10%,rgba(193,95,60,.1),transparent 30%),var(--bg);color:var(--text)}
+.main{max-width:1440px;margin:0 auto;padding:clamp(24px,4vw,56px) clamp(16px,4.5vw,72px) 72px}
+.main h2,.main h3,.drawer h2,.modal-card h3{font-family:Georgia,"Times New Roman",serif;font-weight:400}
+.article-card,.status-bar,.model-info-bar,.drawer,.modal-card,.toast,.analysis-item,.center-message{background:rgba(255,252,247,.82);border-color:var(--line);border-radius:0;box-shadow:none}
+.article-card:hover{transform:none;border-color:rgba(193,95,60,.4)}
+.btn,.header-btn,.drawer-close{border-radius:0;box-shadow:none}
+.btn-primary{background:var(--accent);color:var(--bg)}
+.btn-outline{background:transparent;border-color:var(--line-strong);color:var(--text)}
+.input{background:rgba(255,255,255,.46);border-color:var(--line-strong);border-radius:0;color:var(--text)}
+.input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(193,95,60,.14)}
+.status-tag,.score-pill,.category-tag{border-radius:0}

@@ -192,3 +192,7 @@ strict（全部概念组）→ without-optional → required-without-negative-te
 > - README.md 面向**人类用户**（功能介绍、运行方法、部署步骤），AGENTS.md 面向 **AI 代理**（架构、代码组织、测试策略、开发约定）
 > - 两份文件**不可互相替代**，各有所众
 > - 项目的实际文件结构必须与 AGENTS.md 中列出的文件清单保持一致
+
+## 界面维护约定
+
+正文使用 `ydchen-portfolio` 的米白 / 赤陶色视觉系统；`YDchen Tools` 页眉是受保护的品牌区域，后续调整不得改变其结构与样式，API、评分和轮询语义也必须保持不变。
