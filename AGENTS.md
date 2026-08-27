@@ -53,7 +53,7 @@ test/
 ## 常用命令
 
 ```bash
-npm install                    # 唯一依赖是 wrangler（devDependencies）
+npm ci                         # 唯一依赖是锁定版本的 wrangler（devDependencies）
 npm run dev                    # 本地开发（wrangler dev，默认 http://localhost:8787）
 npm run deploy                 # 部署（wrangler deploy）
 npm run check                  # 语法检查（node --check 所有 JS 文件）
@@ -63,6 +63,8 @@ npm run db:init:remote         # 初始化远程 D1
 npm run db:show:local          # 查看 settings 表（本地）
 npm run db:show:remote         # 查看 settings 表（远程）
 ```
+
+`package-lock.json` 是 Worker 工具的可复现与安全基线；保持稳定 Wrangler 和已审计的间接依赖覆盖，不使用 `npm audit fix --force` 或预发布版本。
 
 ## AI 模型配置（`src/ai.js`）
 

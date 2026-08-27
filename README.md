@@ -66,9 +66,11 @@ https://你的项目.workers.dev/?demo=1
 
 ```bash
 cd oncopaper-radar
-npm install
-npx wrangler login
+npm ci
+npm exec -- wrangler login
 ```
+
+`package-lock.json` 固定稳定版 Wrangler 与已审计的间接依赖。安装或修复依赖时不要使用 `npm audit fix --force` 或预发布版本。
 
 ---
 
