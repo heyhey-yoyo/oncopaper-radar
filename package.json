@@ -15,6 +15,9 @@
     "db:show:remote": "wrangler d1 execute oncopaper-radar --remote --command=\"SELECT * FROM settings;\""
   },
   "devDependencies": {
-    "wrangler": "^4.26.0"
+    "wrangler": "4.115.0"
+  },
+  "overrides": {
+    "undici": "7.29.0"
   }
 }
