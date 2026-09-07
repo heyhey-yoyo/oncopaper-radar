@@ -33,6 +33,10 @@
 
 正文采用 `ydchen-portfolio` 的暖米白、浅灰与赤陶色视觉系统，使用衬线标题和扁平化信息卡片；`YDchen Tools` 页眉结构与样式保持不变。
 
+## 数据与隐私
+
+检索关键词、评分结果与每日简报保存在你自己的 Cloudflare D1 数据库中，不向第三方共享。管理令牌仅保存在当前浏览器会话（`sessionStorage`），关闭页面即失效。工具无账户系统，不收集个人信息；AI 评分只处理论文标题、摘要与元数据。
+
 ## 本地运行
 
 需要：
@@ -81,7 +85,7 @@ npx wrangler secret put ADMIN_TOKEN
 npm run deploy
 ```
 
-部署时会自动创建 Cloudflare Workflows 绑定（`RADAR_WORKFLOW`），无需手动配置。
+部署时会自动创建 Cloudflare Workflows 绑定（`RADAR_WORKFLOW`），无需手动配置。日常迭代推送 `main` 分支即可经 Cloudflare Git 集成自动构建部署；本节手动步骤用于首次创建资源与排障。
 
 可选：设置 NCBI API Key 以提高 PubMed 请求额度：
 
@@ -95,6 +99,10 @@ npx wrangler secret put NCBI_API_KEY
 
 这是科研信息筛选工具，不是生物医学结论的最终裁判。AI 解读只依据标题、摘要与元数据，关键结论必须回到原文和原始数据核验。
 
+## License
+
+MIT
+
 ---
 
 > AI 编程代理请阅读 [AGENTS.md](./AGENTS.md) 了解代码架构、测试策略与开发约定。
@@ -106,7 +114,7 @@ npx wrangler secret put NCBI_API_KEY
 > **⚠️ 任何修改此项目的 AI 代理（Claude Code、Cursor、Copilot 等）都必须同步更新本文件与 AGENTS.md。**
 >
 > - 新增功能 → 在 README 中添加用户可理解的说明
-> - 新增/删除文件 → 更新本文和 AGENTS.md 中的文件清单
+> - 新增/删除文件 → 更新 AGENTS.md 中的文件清单
 > - 修改架构 → 更新 AGENTS.md 的架构说明
 > - 部署方式变更 → 同步更新本文部署章节
 > - 保持 README 面向人类用户，AGENTS.md 面向 AI 代理，两份文件不可互相替代

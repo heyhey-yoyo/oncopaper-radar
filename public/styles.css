@@ -69,7 +69,7 @@ code { padding: 1px 5px; border-radius: 5px; background: #eef2f7; color: #475569
   font-size: 1.25rem; font-weight: 600; color: #0f172a; letter-spacing: -.025em;
 }
 .brand-light {
-  font-size: 1.25rem; font-weight: 300; color: #94a3b8; margin-left: .375rem;
+  font-size: 1.25rem; font-weight: 300; color: #6f6a62; margin-left: .375rem;
 }
 .header-divider {
   width: 1px; height: 36px; background: rgba(203,213,225,.8); flex-shrink: 0;
@@ -389,7 +389,7 @@ p { margin: 0; }
   background: var(--accent-soft);
   border-radius: var(--radius-sm);
   font-size: .8rem;
-  color: #115e59;
+  color: #743721;
   display: flex;
   align-items: center;
   gap: 8px;

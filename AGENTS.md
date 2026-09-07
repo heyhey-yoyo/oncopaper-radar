@@ -12,7 +12,7 @@ OncoPaper Radar 是一个部署在 Cloudflare Workers 上的个人科研文献�
 4. AI 全挂时自动回退到确定性规则引擎（关键词匹配 + 标题规则）；
 5. 同步和画像生成跑在 Cloudflare Workflows 上，HTTP 请求立即返回任务 ID，前端短轮询进度；
 6. Cron Trigger 每天 05:00 UTC 自动运行；
-7. 去重缓存 — 同一画像 + 同一 prompt 版本不重复评分同一篇论文。
+7. 去重缓存：同一画像 + 同一 prompt 版本不重复评分同一篇论文。
 
 项目文档（README、schema、注释）主要使用中文，代码注释与新增文档沿用中文；代码标识符保持英文。
 
@@ -43,6 +43,12 @@ OncoPaper Radar 是一个部署在 Cloudflare Workers 上的个人科研文献�
 | `test/ai.test.js` | 启发式评分边界、画像降级测试 |
 | `test/query.test.js` | 查询构造、术语清洗回归测试 |
 | `test/radar.test.js` | 论文身份、候选截断、别名兼容回归测试 |
+| `schema.sql` | D1 建表 SQL（`db:init:local` / `db:init:remote` 使用） |
+| `wrangler.jsonc` | Worker 配置（D1 / AI / ASSETS / Workflows 绑定、Cron、`run_worker_first`） |
+| `public/project-mark.svg` | 项目专属标志（favicon） |
+| `package.json` / `package-lock.json` | npm 脚本与锁定依赖 |
+| `CHANGED_FILES.md` / `UPGRADE.md` / `VALIDATION.md` | 变更记录、升级说明与验收记录 |
+| `LICENSE` | MIT 许可证 |
 
 ## 运行与构建
 
@@ -136,6 +142,14 @@ Token 配置：`runAIForJSON` 的 `maxTokens` 通过 `clampInt` 限制在 128–
 - 不改 `index.html` 和 `styles.css` 的情况下可以单独更新 `app.js`
 - 轮询间隔 2 秒，最多 600 次（20 分钟），超出提示用户关页面稍后重连
 
+## 部署
+
+- Cloudflare Workers：`wrangler.jsonc` 声明 D1（`DB`）、Workers AI（`AI`）、静态资源（`ASSETS`，`run_worker_first: ["/*"]`）与 Workflows（`RADAR_WORKFLOW`）绑定；`npm run deploy` 部署，Workflows 绑定自动创建。
+- D1 首次需 `wrangler d1 create oncopaper-radar` 并回填 `database_id`；schema 由 `schema.sql` 初始化（`db:init:local` / `db:init:remote`），运行时迁移自动升级。
+- Secrets：`ADMIN_TOKEN`（必须，未设置时管理 API 返回 503）、`NCBI_API_KEY`（可选），均通过 `wrangler secret put` 设置，不写入仓库。
+- Cron `0 5 * * *`（UTC）与绑定变更需重新部署后生效。
+- 日常迭代推送 `main` 分支经 Cloudflare Git 集成自动构建部署。
+
 ## 安全与数据注意事项
 
 - `ADMIN_TOKEN` 必须通过 `wrangler secret put` 设置，不设则管理 API 全部 503；不把 token 写入代码或提交仓库
@@ -151,7 +165,7 @@ Token 配置：`runAIForJSON` 的 `maxTokens` 通过 `clampInt` 限制在 128–
 
 ## 标志维护约定
 
-`YDchen Tools` 文字页眉是受保护的品牌区域，必须保持原结构、尺寸与样式；项目专属统一标志仅用于 favicon 或现有非页眉标志，不得改变页面布局。
+`YDchen Tools` 文字页眉是受保护的品牌区域，必须保持原结构、尺寸与样式；项目专属统一标志 `public/project-mark.svg` 仅用于 favicon 或现有非页眉标志，不得改变页面布局。
 
 ---
 
@@ -159,7 +173,7 @@ Token 配置：`runAIForJSON` 的 `maxTokens` 通过 `clampInt` 限制在 128–
 
 > **⚠️ 任何修改此项目的 AI 代理（包括未来的你自己）都必须遵守：**
 >
-> - 修改代码后必须同步更新本 AGENTS.md 与 README.md — 新增文件、架构变更、功能增删、部署方式变更都需要在两份文档中体现
+> - 修改代码后必须同步更新本 AGENTS.md 与 README.md——新增文件、架构变更、功能增删、部署方式变更都需要在两份文档中体现
 > - README.md 面向人类用户（功能介绍、运行方法、部署步骤），AGENTS.md 面向 AI 代理（架构、代码组织、测试策略、开发约定）
-> - 两份文件不可互相替代，各有所众
+> - 两份文件不可互相替代，各有所长
 > - 项目的实际文件结构必须与 AGENTS.md 中列出的文件清单保持一致
