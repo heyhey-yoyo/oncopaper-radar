@@ -135,10 +135,16 @@ async function verifyToken() {
   try {
     await api('/auth/check');
     S.isLoggedIn = true;
-  } catch {
-    S.isLoggedIn = false;
-    S.token = '';
-    sessionStorage.removeItem('oncopaper_admin_token');
+  } catch (error) {
+    if (error.status === 401 || error.status === 403) {
+      // 令牌确实失效才清除登录态。
+      S.isLoggedIn = false;
+      S.token = '';
+      sessionStorage.removeItem('oncopaper_admin_token');
+    } else {
+      // 网络抖动或服务暂不可用：保留登录态，仅提示重试。
+      showToast('Could not verify your session (network issue). Still logged in; please retry later.', 'error');
+    }
   }
   updateAuthUI();
 }
@@ -237,10 +243,14 @@ async function api(path, options = {}) {
       signal: controller.signal,
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    if (!response.ok) {
+      const error = new Error(data.error || `HTTP ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
     return data;
   } catch (error) {
-    if (error.name === 'AbortError') throw new Error('Request timed out. The background workflow may still be running.');
+    if (error.name === 'AbortError') throw new Error('请求超时，后台任务可能仍在运行。');
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -367,22 +377,22 @@ function showEmpty(reason, latestAttempt = null) {
   const time = latestAttempt?.run_at ? ` (${formatDatabaseTime(latestAttempt.run_at)})` : '';
 
   if (reason === 'empty') {
-    title.textContent = 'No articles selected';
-    paragraph.textContent = `${latestAttempt?.message || 'Recent sync found no new matching articles.'}${time}`;
+    title.textContent = '暂无入选文献';
+    paragraph.textContent = `${latestAttempt?.message || '最近一次同步没有找到新的匹配文献。'}${time}`;
     if (actions) actions.style.display = '';
   } else if (reason === 'error') {
-    title.textContent = latestAttempt ? 'Latest sync failed' : 'Load failed';
+    title.textContent = latestAttempt ? '最近一次同步失败' : '加载失败';
     paragraph.textContent = latestAttempt
-      ? `${latestAttempt.message || 'Check the Worker logs for details.'}${time}`
-      : 'Check the D1 binding and Worker logs for details.';
+      ? `${latestAttempt.message || '同步未完成，请稍后重试。'}${time}`
+      : '暂时无法加载文献，请稍后重试。';
     if (actions) actions.style.display = 'none';
   } else if (reason === 'skipped') {
-    title.textContent = 'Latest sync was skipped';
-    paragraph.textContent = `${latestAttempt?.message || 'Automatic sync is disabled.'}${time}`;
+    title.textContent = '最近一次同步已跳过';
+    paragraph.textContent = `${latestAttempt?.message || '自动同步已关闭。'}${time}`;
     if (actions) actions.style.display = '';
   } else {
-    title.textContent = 'No digest yet';
-    paragraph.textContent = 'Log in, configure search keywords, and trigger a sync to discover papers.';
+    title.textContent = '尚无文献简报';
+    paragraph.textContent = '登录后设置检索关键词，再开始同步文献。';
     if (actions) actions.style.display = '';
   }
 }
@@ -424,7 +434,7 @@ async function loadSettingsIntoForm() {
 
 async function saveConfig() {
   if (!S.isLoggedIn) {
-    showToast('Please login first', 'error');
+    showToast('请先登录', 'error');
     return;
   }
 
@@ -453,7 +463,7 @@ async function saveConfig() {
 /* ── Sync workflow ────────────────────────────────────────── */
 async function triggerSync() {
   if (!S.isLoggedIn) {
-    showToast('Please login first', 'error');
+    showToast('请先登录', 'error');
     return;
   }
   if (S.syncRunning) return;
@@ -461,13 +471,13 @@ async function triggerSync() {
   setSyncRunning(true);
   try {
     const queued = await api('/sync', { method: 'POST' });
-    showDrawerMsg(queued.already_running ? 'A sync is already running. Reconnected to it.' : 'Sync queued in Cloudflare Workflows.', 'success', 20_000);
+    showDrawerMsg(queued.already_running ? '已连接到正在进行的同步。' : '同步已排队，可关闭设置面板查看进度。', 'success', 20_000);
     const run = await waitForRun(queued.run_id, updateSyncProgress);
     const result = run.result || {};
 
-    if (run.status === 'failed') throw new Error(run.error || 'Sync failed');
+    if (run.status === 'failed') throw new Error(run.error || '同步失败');
     if (result.status === 'ok') {
-      showDrawerMsg(`Sync complete, ${result.selected_count || 0} selected`, 'success');
+      showDrawerMsg(`同步完成，入选 ${result.selected_count || 0} 篇文献`, 'success');
       closeDrawer();
       await loadLatest();
     } else {
@@ -487,7 +497,7 @@ async function resumeActiveSync() {
     const data = await api('/runs/active?type=sync');
     if (!data.run) return;
     setSyncRunning(true);
-    showToast('Reconnected to an active sync', 'success');
+    showToast('已重新连接正在进行的同步', 'success');
     const run = await waitForRun(data.run.id, updateSyncProgress);
     if (run.status === 'completed') await loadLatest();
   } catch {
@@ -499,23 +509,42 @@ async function resumeActiveSync() {
 
 function setSyncRunning(running) {
   S.syncRunning = running;
+  if (running) showWorkflowProgress('sync', { status: 'queued', progress: 0 });
+  else document.getElementById('syncProgress').hidden = true;
   const button = $('#syncBtn');
   button.disabled = running || !S.isLoggedIn;
   if (!button.dataset.originalHtml) button.dataset.originalHtml = button.innerHTML;
-  button.innerHTML = running ? 'Starting workflow...' : button.dataset.originalHtml;
+  button.innerHTML = running ? '正在启动任务…' : button.dataset.originalHtml;
   updateAuthUI();
 }
 
+const STAGE_LABELS = {
+  initializing:'正在初始化', 'loading PMIDs':'读取文献', 'generating profile':'生成研究画像',
+  'reading settings':'读取检索设置', 'searching Europe PMC and PubMed':'检索文献',
+  'search complete':'检索完成', 'deduplicating and pre-ranking':'去重与初筛',
+  'AI ranking and analysis':'智能评分与分析', 'storing digest':'保存简报',
+  queued:'等待开始', running:'处理中', completed:'已完成', failed:'失败', skipped:'已跳过'
+};
+function workflowLabel(run) {
+  const stage = run.stage || run.status;
+  return `${STAGE_LABELS[stage] || stage || '处理中'} ${Math.max(0, Math.min(100, Number(run.progress) || 0))}%`;
+}
+function showWorkflowProgress(type, run) {
+  const element = document.getElementById(`${type}Progress`);
+  element.hidden = false;
+  element.textContent = `${type === 'sync' ? '文献同步' : '研究画像'}：${workflowLabel(run)}`;
+}
 function updateSyncProgress(run) {
   const button = $('#syncBtn');
-  button.innerHTML = `${esc(run.stage || 'Working')} ${Number(run.progress) || 0}%`;
-  showDrawerMsg(`Background sync: ${run.stage || run.status} (${Number(run.progress) || 0}%)`, 'success', 5_000);
+  button.textContent = workflowLabel(run);
+  showWorkflowProgress('sync', run);
+  showDrawerMsg(`文献同步：${workflowLabel(run)}`, 'success', 5_000);
 }
 
 /* ── Profile workflow ─────────────────────────────────────── */
 async function generateProfile() {
   if (!S.isLoggedIn) {
-    showToast('Please login first. Use the login button in the header.', 'error');
+    showToast('请通过页首按钮登录后再继续。', 'error');
     return;
   }
   if (S.profileRunning) return;
@@ -523,11 +552,11 @@ async function generateProfile() {
   const raw = $('#pmidInput').value.trim();
   const pmids = [...new Set(raw.split(/[,\n\s]+/).map(value => value.trim()).filter(value => /^\d{5,10}$/.test(value)))];
   if (!pmids.length) {
-    showGenerateMsg('Please enter valid numeric PMIDs', 'error');
+    showGenerateMsg('请输入有效的数字 PMID', 'error');
     return;
   }
   if (pmids.length > 12) {
-    showGenerateMsg('At most 12 PMIDs are allowed per profile generation.', 'error');
+    showGenerateMsg('每次生成研究画像最多输入 12 个 PMID。', 'error');
     return;
   }
 
@@ -537,15 +566,15 @@ async function generateProfile() {
       method: 'POST',
       body: JSON.stringify({ pmids }),
     });
-    showGenerateMsg('Profile generation queued.', 'success', 20_000);
+    showGenerateMsg('研究画像已排队生成。', 'success', 20_000);
     const run = await waitForRun(queued.run_id, updateProfileProgress);
-    if (run.status === 'failed') throw new Error(run.error || 'Profile generation failed');
+    if (run.status === 'failed') throw new Error(run.error || '研究画像生成失败');
     const result = run.result || {};
     $('#focus').value = result.focus || '';
     $('#queryGroups').value = (result.query_groups || []).join('\n');
     $('#excludeTerms').value = result.exclude_terms || '';
     S.generatedProfile = result.query_plan || null;
-    showGenerateMsg(`Generated from ${result.paper_count || pmids.length} papers. Review and save.`, 'success', 10_000);
+    showGenerateMsg(`已根据 ${result.paper_count || pmids.length} 篇文献生成，请检查后保存。`, 'success', 10_000);
   } catch (error) {
     showGenerateMsg(error.message, 'error', 12_000);
   } finally {
@@ -555,16 +584,19 @@ async function generateProfile() {
 
 function setProfileRunning(running) {
   S.profileRunning = running;
+  if (running) showWorkflowProgress('profile', { status: 'queued', progress: 0 });
+  else document.getElementById('profileProgress').hidden = true;
   const button = $('#generateProfileBtn');
   if (!button.dataset.originalText) button.dataset.originalText = button.textContent;
   button.disabled = running || !S.isLoggedIn;
-  button.textContent = running ? 'Starting workflow...' : button.dataset.originalText;
+  button.textContent = running ? '正在启动任务…' : button.dataset.originalText;
   updateAuthUI();
 }
 
 function updateProfileProgress(run) {
-  $('#generateProfileBtn').textContent = `${run.stage || 'Generating'} ${Number(run.progress) || 0}%`;
-  showGenerateMsg(`Background task: ${run.stage || run.status}`, 'success', 5_000);
+  $('#generateProfileBtn').textContent = workflowLabel(run);
+  showWorkflowProgress('profile', run);
+  showGenerateMsg(`研究画像：${workflowLabel(run)}`, 'success', 5_000);
 }
 
 async function waitForRun(runId, onUpdate) {
@@ -581,7 +613,7 @@ async function waitForRun(runId, onUpdate) {
     }
     await sleep(2_000);
   }
-  throw new Error('The workflow is still running. You can close the page and reconnect later.');
+  throw new Error('任务仍在后台运行，可以稍后重新打开页面查看。');
 }
 
 /* ── Model info ───────────────────────────────────────────── */

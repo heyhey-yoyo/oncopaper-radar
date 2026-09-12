@@ -12,6 +12,38 @@ import { cleanText, clampInt, chunk, deduplicateBy, friendlyError, D1_BIND_CHUNK
 const MAX_CANDIDATES = 80;
 const MIN_SEARCH_RESULTS = 5;
 
+/* ── Bounded HTTP ─────────────────────────────────────────── */
+// 外部 API 挂起不能干等 Workflow 步级 5 分钟超时：每次请求有显式超时，
+// 网络错误与 429/5xx 做有限次指数退避重试，其余错误立即抛出。
+const FETCH_TIMEOUT_MS = 15_000;
+const FETCH_MAX_ATTEMPTS = 3;
+
+async function fetchWithRetry(url, options, label) {
+  let lastError;
+  for (let attempt = 1; attempt <= FETCH_MAX_ATTEMPTS; attempt += 1) {
+    let response;
+    try {
+      response = await fetch(url, { ...options, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    } catch (error) {
+      lastError = error;
+      if (attempt === FETCH_MAX_ATTEMPTS) break;
+      await sleep(Math.min(4_000, 250 * 2 ** (attempt - 1)));
+      continue;
+    }
+    if (response.ok) return response;
+    lastError = new Error(`${label} HTTP ${response.status}`);
+    const retryable = response.status === 429 || response.status >= 500;
+    if (!retryable || attempt === FETCH_MAX_ATTEMPTS) break;
+    await response.body?.cancel().catch(() => undefined);
+    await sleep(Math.min(4_000, 250 * 2 ** (attempt - 1)));
+  }
+  throw lastError;
+}
+
+function sleep(milliseconds) {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
 /* ── Search ───────────────────────────────────────────────── */
 export async function searchLiterature(env, settings) {
   const tiers = buildQueryTiers(settings);
@@ -166,12 +198,15 @@ function buildQueryTiers(settings) {
 }
 
 async function postEuropePMC(params, label = 'HTTP') {
-  const response = await fetch('https://www.ebi.ac.uk/europepmc/webservices/rest/searchPOST', {
-    method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params,
-  });
-  if (!response.ok) throw new Error(`Europe PMC ${label} HTTP ${response.status}`);
+  const response = await fetchWithRetry(
+    'https://www.ebi.ac.uk/europepmc/webservices/rest/searchPOST',
+    {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params,
+    },
+    `Europe PMC ${label}`,
+  );
   return response.json();
 }
 
@@ -209,12 +244,15 @@ async function fetchPubMed(query, apiKey) {
     tool: 'oncopaper-radar',
   });
   if (apiKey) params.set('api_key', apiKey);
-  const response = await fetch('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi', {
-    method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params,
-  });
-  if (!response.ok) throw new Error(`PubMed ESearch HTTP ${response.status}`);
+  const response = await fetchWithRetry(
+    'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi',
+    {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params,
+    },
+    'PubMed ESearch',
+  );
   const data = await response.json();
   return data.esearchresult?.idlist ?? [];
 }
@@ -265,10 +303,11 @@ export async function fetchPapersByPMIDs(pmids, apiKey) {
 async function fetchPubMedSummaries(pmids, apiKey) {
   const params = new URLSearchParams({ db: 'pubmed', retmode: 'json', id: pmids.join(','), tool: 'oncopaper-radar' });
   if (apiKey) params.set('api_key', apiKey);
-  const response = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?${params}`, {
-    headers: { Accept: 'application/json' },
-  });
-  if (!response.ok) throw new Error(`PubMed ESummary HTTP ${response.status}`);
+  const response = await fetchWithRetry(
+    `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?${params}`,
+    { headers: { Accept: 'application/json' } },
+    'PubMed ESummary',
+  );
   const data = await response.json();
   return pmids.map(pmid => {
     const record = data.result?.[pmid];

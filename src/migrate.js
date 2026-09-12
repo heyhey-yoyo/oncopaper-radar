@@ -40,7 +40,7 @@ async function migrateSchema(env) {
       query_text TEXT NOT NULL DEFAULT '',
       candidate_count INTEGER NOT NULL DEFAULT 0,
       selected_count INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'ok',
+      status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'empty', 'error', 'skipped')),
       error TEXT,
       model TEXT NOT NULL DEFAULT '',
       run_id TEXT

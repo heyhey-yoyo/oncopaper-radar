@@ -157,7 +157,8 @@ Token 配置：`runAIForJSON` 的 `maxTokens` 通过 `clampInt` 限制在 128–
 - D1 查询全部参数化（`.bind()`），SQL 无拼接
 - CORS 仅允许同源请求
 - 安全响应头：`X-Frame-Options: DENY`、`Content-Security-Policy`（default-src 'self'）
-- 错误信息经过 `friendlyError()` 脱敏（截断 + 替换错误码）
+- 错误信息经过 `friendlyError()` 脱敏（截断 + 替换错误码）；未认证访问者只会收到通用错误文案，内部错误细节仅写入日志
+- 管理令牌比较使用 `constantTimeEqual()` 常量时间比较，避免时序侧信道
 
 ## 界面维护约定
 
@@ -168,6 +169,10 @@ Token 配置：`runAIForJSON` 的 `maxTokens` 通过 `clampInt` 限制在 128–
 `YDchen Tools` 文字页眉是受保护的品牌区域，必须保持原结构、尺寸与样式；项目专属统一标志 `public/project-mark.svg` 仅用于 favicon 或现有非页眉标志，不得改变页面布局。
 
 ---
+
+## 2026-09-13 维护补充
+
+syncProgress 与 profileProgress 独立展示并使用 role=status，结束后隐藏；阶段文本通过文本节点写入并限制百分比到 0–100。保留同步和画像各自的运行状态。
 
 ## AI 维护提醒
 

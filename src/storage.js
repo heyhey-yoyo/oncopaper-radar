@@ -128,7 +128,6 @@ export async function upsertCandidateMetadata(env, candidates) {
       first_seen_at, last_seen_at
     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'), datetime('now'))
     ON CONFLICT(canonical_id) DO UPDATE SET
-      article_id = processed_articles.article_id,
       pmid = COALESCE(excluded.pmid, processed_articles.pmid),
       pmcid = COALESCE(excluded.pmcid, processed_articles.pmcid),
       doi = COALESCE(excluded.doi, processed_articles.doi),

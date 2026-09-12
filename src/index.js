@@ -26,7 +26,7 @@ import {
   upsertCandidateMetadata,
 } from './storage.js';
 import { ensureSchema } from './migrate.js';
-import { cleanText, clampInt, safeParse, HttpError, friendlyError } from './utils.js';
+import { cleanText, clampInt, safeParse, HttpError, friendlyError, constantTimeEqual } from './utils.js';
 
 const NETWORK_STEP_CONFIG = {
   retries: { limit: 3, delay: '5 seconds', backoff: 'exponential' },
@@ -66,8 +66,12 @@ export default {
       return serveAssets(request, env);
     } catch (error) {
       console.error('[HTTP] unhandled error', error);
-      const status = error instanceof HttpError ? error.status : 500;
-      return json({ error: friendlyError(error) }, status);
+      if (error instanceof HttpError) return json({ error: error.message }, error.status);
+      // 未认证访问者只拿到通用文案，内部错误细节仅保留在日志中。
+      const message = isAdminRequest(request, env)
+        ? friendlyError(error)
+        : 'Internal error. Please try again later.';
+      return json({ error: message }, 500);
     }
   },
 
@@ -480,12 +484,19 @@ async function finishRun(env, runId, { stage = 'completed', result, model } = {}
   });
 }
 
+function bearerToken(request) {
+  return request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '') ?? '';
+}
+
+function isAdminRequest(request, env) {
+  return Boolean(env.ADMIN_TOKEN) && constantTimeEqual(bearerToken(request), env.ADMIN_TOKEN);
+}
+
 function requireAdminResponse(request, env) {
   if (!env.ADMIN_TOKEN) {
     return json({ error: 'ADMIN_TOKEN is not configured. Add it with: npx wrangler secret put ADMIN_TOKEN' }, 503);
   }
-  const token = request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '') ?? '';
-  if (!token || token !== env.ADMIN_TOKEN) return json({ error: 'Unauthorized' }, 401);
+  if (!isAdminRequest(request, env)) return json({ error: 'Unauthorized' }, 401);
   return null;
 }
 
