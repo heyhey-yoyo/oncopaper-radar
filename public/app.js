@@ -663,7 +663,7 @@ function updateQuotaTimer() {
   const hours = Math.floor(difference / 3_600_000);
   const minutes = Math.floor((difference % 3_600_000) / 60_000);
   const seconds = Math.floor((difference % 60_000) / 1_000);
-  $('#quotaReset').textContent = `Quota resets in ${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
+  $('#quotaReset').textContent = `额度将在 ${hours} 小时 ${String(minutes).padStart(2, '0')} 分 ${String(seconds).padStart(2, '0')} 秒后重置`;
 }
 
 /* ── Utils ────────────────────────────────────────────────── */

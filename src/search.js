@@ -18,7 +18,7 @@ const MIN_SEARCH_RESULTS = 5;
 const FETCH_TIMEOUT_MS = 15_000;
 const FETCH_MAX_ATTEMPTS = 3;
 
-async function fetchWithRetry(url, options, label) {
+export async function fetchWithRetry(url, options, label) {
   let lastError;
   for (let attempt = 1; attempt <= FETCH_MAX_ATTEMPTS; attempt += 1) {
     let response;
