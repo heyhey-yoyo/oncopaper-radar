@@ -1,6 +1,6 @@
 # OncoPaper Radar 部署与升级
 
-本项目使用完整 Git 仓库与 Cloudflare Git 集成，不再通过旧覆盖包替换部分文件。日常修改推送 main 后自动部署；配置与模块说明见 [README.md](./README.md)、[AGENTS.md](./AGENTS.md)。
+本项目使用完整 Git 仓库与 Cloudflare Git 集成。日常修改推送 main 后自动部署；配置与模块说明见 [README.md](./README.md)、[AGENTS.md](./AGENTS.md)。
 
 ## 日常升级
 
@@ -12,7 +12,7 @@ npm run check
 npm test
 ```
 
-通过适用检查后提交本次实际改动并推送 main，等待 Cloudflare 部署成功。确认部署 commit；浏览器禁用缓存/硬刷新，并核对加载的 HTML、CSS、JS，不能只看 GitHub 推送成功。
+通过适用检查后提交经过审查的改动并推送 main，等待 Cloudflare 部署成功。确认部署 commit；浏览器禁用缓存/硬刷新，并核对加载的 HTML、CSS、JS，不能只看 GitHub 推送成功。
 
 ## 首次配置与数据库
 
