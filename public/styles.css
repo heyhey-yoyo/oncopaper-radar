@@ -75,8 +75,7 @@ code { padding: 1px 5px; border-radius: 5px; background: #eef2f7; color: #475569
 .site-header {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  position: sticky;
-  top: 0;
+  position: static;
   z-index: 10;
 }
 .header-inner { display: flex; align-items: center; gap: 16px; }

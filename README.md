@@ -127,6 +127,10 @@ npm run check
 npm test
 ```
 
+## 页眉滚动行为更新
+
+品牌页眉位于文档顶部，随页面正常滚走，不使用 fixed/sticky 吸顶；字体、字号、标志尺寸和三类排布基准保持一致。
+
 ## AI 维护提醒
 
 > **⚠️ 任何修改此项目的 AI 代理（Claude Code、Cursor、Copilot 等）都必须同步更新本文件与 AGENTS.md。**
