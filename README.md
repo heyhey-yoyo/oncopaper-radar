@@ -80,7 +80,7 @@ npm run db:init:remote
 3. 设置管理员令牌（必须，未配置时所有管理 API 返回 503）：
 
 ```bash
-npx wrangler secret put ADMIN_TOKEN
+npm exec -- wrangler secret put ADMIN_TOKEN
 ```
 
 4. 部署：
@@ -94,7 +94,7 @@ npm run deploy
 可选：设置 NCBI API Key 以提高 PubMed 请求额度：
 
 ```bash
-npx wrangler secret put NCBI_API_KEY
+npm exec -- wrangler secret put NCBI_API_KEY
 ```
 
 部署后在网址后加 `?demo=1` 可进入演示模式，使用假数据、不调用外部 API 或 AI。
@@ -106,6 +106,12 @@ npx wrangler secret put NCBI_API_KEY
 ## License
 
 MIT
+
+---
+
+> AI 编程代理请阅读 [AGENTS.md](./AGENTS.md) 了解代码架构、测试与开发约定。
+
+---
 
 ## AI 维护提醒
 
