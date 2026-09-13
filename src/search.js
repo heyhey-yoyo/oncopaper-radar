@@ -141,12 +141,16 @@ export async function searchLiterature(env, settings) {
     throw new Error(`Both literature sources failed. ${sourceErrors.slice(-4).join(' | ')}`);
   }
 
+  if (sourceErrors.length && !probe.usableCount) {
+    throw new Error('部分文献来源暂时不可用，检索尚未完成，不能据此判断没有新论文。');
+  }
   const tier = probe.tier || tiers.at(-1);
   return {
     candidates: probe.candidates,
     queryText: `Europe PMC: ${tier.europeQuery}
 PubMed: ${tier.pubmedQuery}`,
     tierLabel: tier.label,
+    incomplete: sourceErrors.length > 0,
   };
 }
 

@@ -206,7 +206,7 @@ export async function persistProcessingDecisions(env, settings, selectedArticles
   await batchInChunks(env.DB, statements, 40);
 }
 
-export async function storeDigestResults(env, runId, queryText, candidateCount, scored, model) {
+export async function storeDigestResults(env, runId, queryText, candidateCount, scored, model, incomplete = false) {
   const articleStatements = scored.map(article => env.DB.prepare(`
     INSERT INTO articles (
       id, source, external_id, pmid, pmcid, doi, title, authors,
@@ -226,9 +226,9 @@ export async function storeDigestResults(env, runId, queryText, candidateCount, 
 
   await env.DB.prepare(`
     INSERT OR IGNORE INTO digests (
-      run_at, query_text, candidate_count, selected_count, status, model, run_id
-    ) VALUES (datetime('now'), ?, ?, ?, 'ok', ?, ?)
-  `).bind(queryText, candidateCount, scored.length, model, runId).run();
+      run_at, query_text, candidate_count, selected_count, status, model, run_id, error
+    ) VALUES (datetime('now'), ?, ?, ?, 'ok', ?, ?, ?)
+  `).bind(queryText, candidateCount, scored.length, model, runId, incomplete ? 'PARTIAL_SOURCES' : null).run();
 
   const digest = await env.DB.prepare('SELECT id FROM digests WHERE run_id = ?').bind(runId).first();
   if (!digest) throw new Error('Failed to create digest record.');

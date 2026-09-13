@@ -173,3 +173,10 @@ test('latest failed run does not hide the most recent successful digest', () => 
     latestAttempt,
   });
 });
+
+test('public digest never reflects stored private error details', async () => {
+  const { publicDigest } = await import('../src/radar.js');
+  const hidden = publicDigest({status:'error', error:'internal-token-and-host-sentinel'});
+  assert.ok(hidden.message); assert.ok(!JSON.stringify(hidden).includes('sentinel'));
+  assert.match(publicDigest({status:'ok',error:'PARTIAL_SOURCES'}).message,/检索尚不完整/);
+});

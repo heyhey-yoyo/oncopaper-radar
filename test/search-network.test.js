@@ -29,3 +29,11 @@ test('HTTP 400 不重试，临时 503 释放响应后可恢复', async t => {
   assert.deepEqual(await response.json(), { ok: true });
   assert.equal(attempts, 2); assert.equal(cancelled, true);
 });
+
+test('one source failure and another empty result is incomplete, not empty', async t => {
+  const { searchLiterature } = await import('../src/search.js');
+  t.mock.method(globalThis, 'fetch', async url => String(url).includes('eutils')
+    ? new Response(JSON.stringify({esearchresult:{idlist:[]}})) : new Response('',{status:400}));
+  t.mock.method(console, 'error', () => {});
+  await assert.rejects(searchLiterature({}, {queryGroups:['KRAS'],lookbackDays:7,excludeTerms:[],excludeReviews:false}), /检索尚未完成/);
+});

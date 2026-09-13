@@ -7,7 +7,7 @@
 OncoPaper Radar 是一个部署在 Cloudflare Workers 上的个人科研文献雷达，面向肿瘤分子机制研究。核心流程：
 
 1. 按关键词同时检索 Europe PMC + PubMed，自动补全摘要并去重；
-2. 查询按严格到宽松逐级降级，不会因查不到而误报空结果；
+2. 查询按严格到宽松逐级降级，部分来源失败且无可用新候选时报告未完成；有候选时标记检索不完整；
 3. 用 Workers AI（Qwen3-30B-A3B 优先，Granite 4.0 H Micro 兜底）做两阶段评分（先打分数、再写解读）；
 4. AI 全挂时自动回退到确定性规则引擎（关键词匹配 + 标题规则）；
 5. 同步和画像生成跑在 Cloudflare Workflows 上，HTTP 请求立即返回任务 ID，前端短轮询进度；
@@ -31,7 +31,7 @@ OncoPaper Radar 是一个部署在 Cloudflare Workers 上的个人科研文献�
 | --- | --- |
 | `src/index.js` | Worker 入口、API 路由、RadarWorkflow 定义、候选预排序 |
 | `src/ai.js` | AI 调用封装、两阶段评分、规则回退（heuristicScore/fallbackProfile/fallbackAnalysis） |
-| `src/radar.js` | 论文身份识别、别名生成、多源去重合并、分层探测引擎 |
+| `src/radar.js` | 论文身份识别、别名生成、多源去重合并、分层探测引擎与公开简报脱敏投影 |
 | `src/query.js` | 检索词清洗、Europe PMC / PubMed 查询构造 |
 | `src/search.js` | 文献检索：分层查询、双源抓取、PMID 补全、身份解析 |
 | `src/storage.js` | D1 持久化：运行记录/租约、候选元数据、处理决策、简报 |
@@ -43,6 +43,7 @@ OncoPaper Radar 是一个部署在 Cloudflare Workers 上的个人科研文献�
 | `test/ai.test.js` | 启发式评分边界、画像降级测试 |
 | `test/query.test.js` | 查询构造、术语清洗回归测试 |
 | `test/radar.test.js` | 论文身份、候选截断、别名兼容回归测试 |
+| `test/search-network.test.js` | 外部请求超时、网络错误、429/5xx 有限重试及不可重试状态回归 |
 | `schema.sql` | D1 建表 SQL（`db:init:local` / `db:init:remote` 使用） |
 | `wrangler.jsonc` | Worker 配置（D1 / AI / ASSETS / Workflows 绑定、Cron、`run_worker_first`） |
 | `public/project-mark.svg` | 项目专属标志（favicon） |
@@ -68,7 +69,7 @@ npm run db:show:remote         # 查看 settings 表（远程）
 
 ## 测试
 
-`npm test`（`node --test`）覆盖 AI 评分边界与故障降级（`ai.test.js`）、查询构造回归（`query.test.js`）、论文身份与候选截断及别名兼容回归（`radar.test.js`）。
+`npm test`（`node --test`）覆盖 AI 评分边界与故障降级（`ai.test.js`）、查询构造回归（`query.test.js`）、论文身份与候选截断及别名兼容回归（`radar.test.js`）、外部请求超时/有限重试与部分来源失败不可误报为空（`search-network.test.js`）；公开简报不回显内部错误详情。
 
 发布检查：
 
@@ -89,9 +90,9 @@ npm test
 | `SCORE_CHAIN` | `[QWEN, GRANITE]` | 评分模型链 |
 | `PROMPT_VERSION` | `2026-07-30-v3` | 升版号可强制重新评分所有论文 |
 
-改模型时只需更新 `MODEL_LABELS` 常量（`src/ai.js`），`src/index.js` 的 `handleModelInfo()` 会通过 `MODEL_LABELS[QWEN]` / `MODEL_LABELS[GRANITE]` 自动跟随，无需手动同步。
+更换模型时修改 `src/ai.js` 的实际模型 ID 常量 `QWEN` / `GRANITE`，按需调整 `PROFILE_CHAIN` / `SCORE_CHAIN`，并同步 `MODEL_LABELS` 的显示名称。仅改标签不会替换推理模型；核对真实 AI 调用与 `src/index.js` 的 `handleModelInfo()` 返回值一致。
 
-Token 配置：`runAIForJSON` 的 `maxTokens` 通过 `clampInt` 限制在 128–3000。评分阶段用 700 token（只输出分数），解读阶段用 2500 token（输出中文解读）。每个模型调用有 `withTimeout` 硬超时保护。
+Token 配置：`runAIForJSON` 的 `maxTokens` 通过 `clampInt` 限制在 128–3000。评分阶段用 700 token（只输出分数），解读阶段用 2500 token（输出中文解读）。每个模型调用有 `withTimeout` 等待期限；超时不会取消已提交的 AI 绑定调用。
 
 ### 论文身份识别（`src/radar.js`）
 
@@ -109,7 +110,7 @@ Token 配置：`runAIForJSON` 的 `maxTokens` 通过 `clampInt` 限制在 128–
 
 ### 关键设计决策
 
-- 两阶段评分（`scorePapers`）：ranking 只输出 5 个整数分数（700 token）；enrichment 仅对入选论文输出中文解读（2500 token）。两个阶段独立超时、独立 fallback。
+- 两阶段评分（`scorePapers`）：ranking 只输出 5 个整数分数（700 token）；enrichment 仅对入选论文输出中文解读（2500 token）。两个阶段有各自等待预算和规则回退；ranking 不可用时跳过 enrichment。
 - 确定性回退：`heuristicScore()`、`fallbackProfile()`、`fallbackAnalysis()`。
 - 查询降级（`buildQueryTiers`）：strict → without-optional → required-without-negative-terms → relaxed-required → single-core-without-negative-terms。
 - D1 分块：所有带 `IN (...)` 的查询使用 `D1_BIND_CHUNK = 30` 分块。
@@ -137,7 +138,7 @@ Token 配置：`runAIForJSON` 的 `maxTokens` 通过 `clampInt` 限制在 128–
 | GET | `/api/runs/active` | 需要 | 获取当前活跃 run |
 | GET | `/api/runs/:id` | 需要 | 获取指定 run 状态 |
 | GET | `/api/digests` | 需要 | 简报列表 |
-| GET | `/api/digests/latest` | 公开 | 最新简报 + 入选文章（仅公开字段） |
+| GET | `/api/digests/latest` | 公开 | 最新简报 + 入选文章及评分/解读，匿名可读 |
 | GET | `/api/model-info` | 公开 | 模型信息（静态） |
 
 ### 前端约定
@@ -145,7 +146,7 @@ Token 配置：`runAIForJSON` 的 `maxTokens` 通过 `clampInt` 限制在 128–
 - 纯 HTML/CSS/JS，无框架，无构建工具
 - `esc()` 对所有用户/API 数据渲染做转义
 - `api()` helper 统一处理认证头、超时、错误格式化
-- 保存的 token 存 `sessionStorage`（关页面即失效，比 localStorage 更安全）
+- 保存的 token 存 `sessionStorage`（关标签页通常清除本地副本，服务端 `ADMIN_TOKEN` 需轮换才失效）
 - 不改 `index.html` 和 `styles.css` 的情况下可以单独更新 `app.js`
 - 轮询间隔 2 秒，最多 600 次（20 分钟），超出提示用户关页面稍后重连
 
@@ -169,6 +170,8 @@ syncProgress 与 profileProgress 独立、可被辅助技术读取，进度范�
 
 ## 部署
 
+对外版本以 GitHub Release 为准；应用版本源为根目录 `package.json`，发布时用 `npm install --package-lock-only` 同步 `package-lock.json`。内部数据格式、模型及提示词版本独立演进，不随应用发布机械递增。
+
 - Cloudflare Workers：`wrangler.jsonc` 声明 D1（`DB`）、Workers AI（`AI`）、静态资源（`ASSETS`，`run_worker_first: ["/*"]`）与 Workflows（`RADAR_WORKFLOW`）绑定；`npm run deploy` 部署，Workflows 绑定自动创建。
 - D1 首次需 `wrangler d1 create oncopaper-radar` 并回填 `database_id`；schema 由 `schema.sql` 初始化（`db:init:local` / `db:init:remote`），运行时迁移自动升级。
 - Secrets：`ADMIN_TOKEN`（必须，未设置时管理 API 返回 503）、`NCBI_API_KEY`（可选），均通过 `wrangler secret put` 设置，不写入仓库。
@@ -182,7 +185,7 @@ syncProgress 与 profileProgress 独立、可被辅助技术读取，进度范�
 - D1 查询全部参数化（`.bind()`），SQL 无拼接
 - CORS 仅允许同源请求
 - 安全响应头：`X-Frame-Options: DENY`、`Content-Security-Policy`（default-src 'self'）
-- 错误信息经过 `friendlyError()` 脱敏（截断 + 替换错误码）；未认证访问者只会收到通用错误文案，内部错误细节仅写入日志
+- 公开 `src/radar.js` 的 `publicDigest()` 只输出固定状态文案或 `PARTIAL_SOURCES` 通用提示；详细错误保留鉴权任务/历史记录和日志。`friendlyError()` 的截断不视为保密保证
 - 管理令牌比较使用 `constantTimeEqual()` 常量时间比较，避免时序侧信道
 
 ## 标志维护约定

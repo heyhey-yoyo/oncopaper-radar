@@ -123,7 +123,6 @@ export function processingFingerprintPayload(settings, promptVersion) {
   };
 }
 
-
 export function chooseDigestForDisplay(latestAttempt, latestSuccess) {
   return {
     digest: latestSuccess || latestAttempt || null,
@@ -175,5 +174,19 @@ export async function probeTiersUntilUsable({
     attempts,
     hadSuccessfulSource,
     usableCount: 0,
+  };
+}
+
+export function publicDigest(row) {
+  return {
+    id: row.id,
+    run_at: row.run_at,
+    candidate_count: row.candidate_count,
+    selected_count: row.selected_count,
+    status: row.status,
+    model: row.model,
+    message: row.status === 'ok'
+      ? (row.error === 'PARTIAL_SOURCES' ? '部分来源暂时不可用；以下是可用来源的筛选结果，检索尚不完整。' : null)
+      : ({ error: '同步未完成，请稍后重试；管理员可在任务详情查看原因。', empty: '本次可用检索没有新的匹配文献。', skipped: '自动同步已关闭或尚未配置。' }[row.status] || '本次同步未完成。'),
   };
 }

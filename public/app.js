@@ -291,18 +291,20 @@ function renderArticles(data) {
   $('#statusDate').textContent = formatDatabaseTime(digest.run_at);
   const modelLabel = digest.model || 'Qwen3-30B-A3B';
   const usedHeuristicOnly = /heuristic/i.test(modelLabel);
+  const partialNotice = digest.message ? `<span class="run-warning">${esc(digest.message)}</span>` : '';
   const latestNotice = latestIsNewerFailure ? `
     <span class="run-warning">Latest ${esc(latestAttempt.status)} run at ${esc(formatDatabaseTime(latestAttempt.run_at))}${latestAttempt.message ? `: ${esc(latestAttempt.message)}` : ''}. The papers below are from the most recent successful digest.</span>
   ` : '';
+  const runNotices = `${latestNotice}${partialNotice}`;
   const aiDetails = `
     <span class="ai-badge">${usedHeuristicOnly ? 'Rule Fallback' : 'AI Scored'}</span>
     <span>Model: <strong>${esc(modelLabel)}</strong> via Cloudflare Workers AI. Screened ${Number(digest.candidate_count) || 0} candidates.
     ${usedHeuristicOnly ? 'The AI service was unavailable, so bounded rule-based scoring was used.' : 'Analysis is AI-generated from titles and abstracts only;'} Always verify against full text.</span>
   `;
   const statusAiNote = $('#statusAiNote');
-  statusAiNote.classList.toggle('has-run-warning', Boolean(latestIsNewerFailure));
-  statusAiNote.innerHTML = latestIsNewerFailure
-    ? `${latestNotice}<span class="ai-note-details">${aiDetails}</span>`
+  statusAiNote.classList.toggle('has-run-warning', Boolean(runNotices));
+  statusAiNote.innerHTML = runNotices
+    ? `${runNotices}<span class="ai-note-details">${aiDetails}</span>`
     : aiDetails;
 
   $('#articlesList').innerHTML = articles.map(article => `

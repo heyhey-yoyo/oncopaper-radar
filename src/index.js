@@ -9,7 +9,7 @@ import {
   scorePapers,
 } from './ai.js';
 import { normalizeExcludeTerms, normalizeQueryGroups } from './query.js';
-import { chooseDigestForDisplay, processingFingerprintPayload } from './radar.js';
+import { chooseDigestForDisplay, publicDigest, processingFingerprintPayload } from './radar.js';
 import { fetchPapersByPMIDs, searchLiterature } from './search.js';
 import {
   createWorkflowRun,
@@ -207,6 +207,7 @@ export class RadarWorkflow extends WorkflowEntrypoint {
       const compact = {
         queryText: result.queryText,
         tierLabel: result.tierLabel,
+        incomplete: result.incomplete,
         candidateCount: result.candidates.length,
         candidateIds: result.candidates.map(article => article.canonical_id),
       };
@@ -245,7 +246,7 @@ export class RadarWorkflow extends WorkflowEntrypoint {
         selected_count: scored.articles.length, model: scored.model,
       });
       const digestId = await storeDigestResults(
-        this.env, runId, searchResult.queryText, searchResult.candidateCount, scored.articles, scored.model,
+        this.env, runId, searchResult.queryText, searchResult.candidateCount, scored.articles, scored.model, searchResult.incomplete,
       );
       await persistProcessingDecisions(
         this.env, prepared, scored.articles, candidates.toScore, candidates.preFilteredIds, scored.model,
@@ -259,6 +260,7 @@ export class RadarWorkflow extends WorkflowEntrypoint {
         selected_count: scored.articles.length,
         model: scored.model,
         query_tier: searchResult.tierLabel,
+        incomplete: searchResult.incomplete,
       };
     });
 
@@ -524,17 +526,6 @@ async function readJSON(request, maxBytes) {
   try { return JSON.parse(text || '{}'); } catch { throw new HttpError(400, 'Invalid JSON body.'); }
 }
 
-function publicDigest(row) {
-  return {
-    id: row.id,
-    run_at: row.run_at,
-    candidate_count: row.candidate_count,
-    selected_count: row.selected_count,
-    status: row.status,
-    model: row.model,
-    message: row.status === 'ok' ? null : cleanText(row.error, 300),
-  };
-}
 
 function parseDateScore(value) {
   const timestamp = Date.parse(value || '');
