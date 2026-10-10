@@ -50,6 +50,8 @@ OncoPaper Radar 是一个部署在 Cloudflare Workers 上的个人科研文献�
 | `package.json` / `package-lock.json` | npm 脚本与锁定依赖 |
 | `CHANGED_FILES.md` / `UPGRADE.md` / `VALIDATION.md` | 变更记录、升级说明与验收记录 |
 | `LICENSE` | MIT 许可证 |
+| `.gitignore` | Git 忽略规则 |
+| `README.md` / `AGENTS.md` | 用户向项目说明与 AI 代理维护说明 |
 
 ## 运行与构建
 
@@ -156,7 +158,7 @@ Token 配置：`runAIForJSON` 的 `maxTokens` 通过 `clampInt` 限制在 128–
 
 页眉背景和底部分隔线横跨页面可用宽度，内容区最大宽度 1280px（含两侧各 16px 内边距），整体居中；品牌和标题靠左，操作区靠右，窄屏换行后仍保持该对齐。品牌页眉在文档顶部正常排布，随页面滚走，不固定或吸顶；表格内部表头、侧边工具和手机底部导航可按功能保留。
 
-正文采用统一系统无衬线字体，默认 16px / 1.6；标题采用 Georgia、Times New Roman、Songti SC、STSong 衬线族。数字与代码可使用 SFMono-Regular、Consolas、Liberation Mono、Microsoft YaHei 等宽族。按钮和输入通常 15px，辅助文字 12–14px，密集科学数据允许有理由的局部调整。页面底色 #f3eee5、正文 #24221f、赤陶强调 #a94f31，柔和底色上的强调文字 #823a25；科学分类色、热图、作品主题与状态色保留必要区分度。
+正文采用统一系统无衬线字体，默认 16px / 1.6；标题采用 Georgia、Times New Roman、Songti SC、STSong 衬线族。数字与代码可使用 SFMono-Regular、Consolas、Liberation Mono、Microsoft YaHei 等宽族。按钮和输入通常 15px，辅助文字 12–14px，密集科学数据允许有理由的局部调整。页面底色 #f3eee5、正文 #24221f、赤陶强调 #a94f31；科学分类色、热图、作品主题与状态色保留必要区分度。
 
 主样式保留一个顶层 `:root`，条件规则和深色画布局部令牌独立维护，避免叠加重复主题或末尾覆盖层。修改视觉后核对实际渲染字体、字号、间距、对比度和操作可达性；至少检查 1440、820、390px，涉及断点时补查两侧宽度，涉及画布或存储时补查交互。构建、单测、本地浏览器和线上部署分别记录；发布后禁用缓存/硬刷新，并核对实际资源版本。
 
