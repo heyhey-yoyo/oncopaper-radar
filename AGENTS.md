@@ -59,7 +59,7 @@ OncoPaper Radar 是一个部署在 Cloudflare Workers 上的个人科研文献�
 npm ci                         # 唯一依赖是锁定版本的 wrangler（devDependencies）
 npm run dev                    # 本地开发（wrangler dev，默认 http://localhost:8787）
 npm run deploy                 # 部署（wrangler deploy）
-npm run check                  # 语法检查（node --check 所有 JS 文件）
+npm run check                  # 语法检查（node --check 校验 src/ 与 public/app.js）
 npm test                       # 运行测试（node --test）
 npm run db:init:local          # 用 schema.sql 初始化本地 D1
 npm run db:init:remote         # 初始化远程 D1
