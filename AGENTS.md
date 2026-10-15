@@ -43,7 +43,7 @@ OncoPaper Radar 是一个部署在 Cloudflare Workers 上的个人科研文献�
 | `test/ai.test.js` | 启发式评分边界、画像降级测试 |
 | `test/query.test.js` | 查询构造、术语清洗回归测试 |
 | `test/radar.test.js` | 论文身份、候选截断、别名兼容回归测试 |
-| `test/search-network.test.js` | 外部请求超时、网络错误、429/5xx 有限重试及不可重试状态回归 |
+| `test/search-network.test.js` | 外部请求超时、网络错误、5xx 有限重试及不可重试状态回归 |
 | `schema.sql` | D1 建表 SQL（`db:init:local` / `db:init:remote` 使用） |
 | `wrangler.jsonc` | Worker 配置（D1 / AI / ASSETS / Workflows 绑定、Cron、`run_worker_first`） |
 | `public/project-mark.svg` | 项目专属标志（favicon） |
